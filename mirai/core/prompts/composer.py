@@ -1,0 +1,173 @@
+"""Build LLM message lists: system extras, upload nudges, optional image inlining."""
+
+from __future__ import annotations
+
+import base64
+import re
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
+from mirai.core.prompts.defaults import (
+    NO_VISION_IMAGE_UPLOAD_INSTRUCTION,
+    TOOL_USE_INSTRUCTION,
+    UPLOAD_FILE_INSTRUCTION,
+)
+
+if TYPE_CHECKING:
+    from mirai.core.config import ModelConfig
+    from mirai.core.memories.memory import Memory
+
+# Extra nudge when the user message clearly references Mirai upload storage.
+_UPLOAD_PATH_RE = re.compile(r"\.mirai[/\\]+uploads[/\\]", re.IGNORECASE)
+
+_UPLOAD_ANY_PATH_RE = re.compile(r"(/[^\s\n]+?\.mirai/uploads/[^\s\n]+)", re.IGNORECASE)
+
+_IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico"})
+_MIME_MAP = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif": "image/tiff",
+    ".ico": "image/x-icon",
+}
+_MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
+
+_UPLOAD_IMAGE_PATH_RE = re.compile(
+    r"(/[^\s\n]+?\.mirai/uploads/[^\s\n]+\.(?:png|jpg|jpeg|gif|webp|bmp|tiff|tif|ico))",
+    re.IGNORECASE,
+)
+
+_UPLOADS_ROOT: Path | None = None
+
+
+def _get_uploads_root() -> Path:
+    global _UPLOADS_ROOT
+    if _UPLOADS_ROOT is None:
+        _UPLOADS_ROOT = (Path.home() / ".mirai" / "uploads").resolve()
+    return _UPLOADS_ROOT
+
+
+def _prompt_has_non_image_upload_paths(prompt: str) -> bool:
+    """True if ``prompt`` references an upload path whose extension is not a known image type."""
+    for m in _UPLOAD_ANY_PATH_RE.finditer(prompt):
+        p = m.group(1).strip()
+        ext = Path(p).suffix.lower()
+        if not ext:
+            return True
+        if ext not in _IMAGE_EXTENSIONS:
+            return True
+    return False
+
+
+def _inline_uploaded_images(messages: list[dict], *, vision_supported: bool = True) -> list[dict]:
+    """Scan user messages for uploaded image paths."""
+    uploads_root = _get_uploads_root()
+    result: list[dict] = []
+    for msg in messages:
+        if msg.get("role") != "user" or not isinstance(msg.get("content"), str):
+            result.append(msg)
+            continue
+
+        content = msg["content"]
+        image_paths = _UPLOAD_IMAGE_PATH_RE.findall(content)
+        if not image_paths:
+            result.append(msg)
+            continue
+
+        valid_images: list[tuple[str, str, str]] = []
+        for path_str in image_paths:
+            try:
+                p = Path(path_str).expanduser().resolve()
+                if not p.is_relative_to(uploads_root):
+                    continue
+                if not p.exists() or not p.is_file():
+                    continue
+                if p.stat().st_size > _MAX_INLINE_IMAGE_BYTES:
+                    continue
+                ext = p.suffix.lower()
+                if ext not in _IMAGE_EXTENSIONS:
+                    continue
+                data = p.read_bytes()
+                b64 = base64.standard_b64encode(data).decode("ascii")
+                mime = _MIME_MAP.get(ext, "image/png")
+                valid_images.append((path_str, b64, mime))
+            except Exception:
+                continue
+
+        if not valid_images:
+            result.append(msg)
+            continue
+
+        text = content
+        for path_str, _, _ in valid_images:
+            text = text.replace(path_str, f"[image: {Path(path_str).name}]")
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+        if not vision_supported:
+            result.append({**msg, "content": text})
+            continue
+
+        parts: list[dict] = [{"type": "text", "text": text}]
+        for _, b64, mime in valid_images:
+            parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+
+        result.append({**msg, "content": parts})
+    return result
+
+
+def messages_have_multimodal_images(messages: list[dict]) -> bool:
+    """True if any user message uses OpenAI-style multimodal parts with ``image_url``."""
+    for msg in messages:
+        c = msg.get("content")
+        if not isinstance(c, list):
+            continue
+        for part in c:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                return True
+    return False
+
+
+def compose_messages(
+    memory: Memory,
+    *,
+    prompt: str | None,
+    tools: list | None,
+    ephemeral_messages: list | None,
+    cfg: ModelConfig,
+    upload_mode: Literal["vision", "no_vision"],
+) -> list[dict]:
+    """Build messages with system extras and optional image inlining (vision vs text-only)."""
+    messages = memory.get_context(query=prompt)
+    if messages and messages[0].get("role") == "system":
+        extra_parts: list[str] = []
+        if cfg.chat_append_current_time:
+            now = datetime.now()
+            extra_parts.append(f"\n\n[Current Time] {now.strftime('%Y-%m-%d %H:%M:%S %A')}")
+        if tools and cfg.chat_append_tool_use_instruction:
+            extra_parts.append(TOOL_USE_INSTRUCTION)
+        if tools and prompt and _UPLOAD_PATH_RE.search(prompt):
+            if upload_mode == "vision":
+                extra_parts.append(UPLOAD_FILE_INSTRUCTION)
+            else:
+                if _prompt_has_non_image_upload_paths(prompt):
+                    extra_parts.append(UPLOAD_FILE_INSTRUCTION)
+                if _UPLOAD_IMAGE_PATH_RE.search(prompt):
+                    extra_parts.append(NO_VISION_IMAGE_UPLOAD_INSTRUCTION)
+        if extra_parts:
+            messages[0] = {
+                "role": "system",
+                "content": messages[0]["content"] + "".join(extra_parts),
+            }
+
+    if ephemeral_messages:
+        messages.extend(ephemeral_messages)
+
+    return _inline_uploaded_images(
+        messages,
+        vision_supported=(upload_mode == "vision"),
+    )

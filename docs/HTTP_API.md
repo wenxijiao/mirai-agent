@@ -1,0 +1,215 @@
+# Mirai HTTP API (core server and Relay)
+
+HTTP integration guide for **any language**. Implementation lives in `mirai/core/api.py` (core) and `mirai/relay/app.py` (Relay gateway).
+
+## Basics
+
+| Topic | Notes |
+|--------|--------|
+| Default local base URL | `http://127.0.0.1:8000` (clients may override with `MIRAI_SERVER_URL`) |
+| Interactive docs | After the core server starts: `/docs` (Swagger UI) or `/openapi.json` |
+| CORS | The core defaults to localhost-only browser origins; widen explicitly with env vars if you need cross-origin browser access |
+
+**Security:** these endpoints assume localhost or a trusted LAN. If you expose the server to the public internet, add authentication, TLS, and access controls yourself.
+
+### Security and deployment (trust boundaries)
+
+| Scenario | What to assume | Recommendations |
+|----------|----------------|-----------------|
+| **Core server on `127.0.0.1`** | Only local processes can reach the API | Default for development; do not forward this port to the public Internet without adding auth/TLS |
+| **LAN binding** | Anyone on the same network may call unauthenticated admin routes unless you add controls | Use a firewall; prefer **Tailscale** or similar for remote access instead of raw port exposure |
+| **Relay mode** (`MIRAI_ENABLE_RELAY`) | Clients use Bearer tokens against the Relay base URL; TLS depends on your deployment | Terminate TLS at a reverse proxy when exposing Relay; rotate join codes and tokens if leaked, and set exact browser origins when serving a web app |
+
+The **core** HTTP API does not require a Bearer token by default: treat it as **trusted network** only. **Relay** adds Bearer-scoped access for remote clients; still avoid exposing services you do not intend to run.
+
+### Browser CORS configuration
+
+Mirai now uses **restricted browser defaults**:
+
+- `MIRAI_CORS_ORIGINS` controls which browser origins may call the **core** API.
+- `MIRAI_CORS_ALLOW_CREDENTIALS` controls whether browsers may send credentials to the **core** API.
+- `MIRAI_RELAY_CORS_ORIGINS` controls which browser origins may call the **Relay** API.
+- `MIRAI_RELAY_CORS_ALLOW_CREDENTIALS` controls whether browsers may send credentials to the **Relay** API.
+
+Behavior:
+
+- If unset, both services allow only localhost-style development origins.
+- Browser credentials are **off by default**.
+- If you set origins to `*`, Mirai forces browser credentials back off because wildcard origins and credentialed requests are incompatible in browsers.
+
+Examples:
+
+```bash
+# Allow a production web app to call Relay over HTTPS.
+export MIRAI_RELAY_CORS_ORIGINS="https://app.example.com"
+
+# Allow a custom browser client to call the core API on a trusted private network.
+export MIRAI_CORS_ORIGINS="https://dashboard.example.internal"
+```
+
+### Relay CORS and browsers
+
+The Relay gateway can be opened to additional browser origins with env vars, but **do not rely on browser CORS alone for security**. In production, put Relay behind HTTPS, restrict origins if you serve a web app, and use short-lived tokens. Native clients and server-side callers are unaffected by browser CORS.
+
+---
+
+## Chat: `POST /chat`
+
+- **Request Content-Type:** `application/json`
+- **Response Content-Type:** `application/x-ndjson` (one JSON object per line)
+
+### Request body
+
+| Field | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `prompt` | string | yes | — | User message |
+| `session_id` | string | no | `"default"` | Session id for context isolation |
+| `think` | boolean | no | `false` | Enable “thinking” style output when supported by the model/provider |
+
+### Response body (streaming NDJSON)
+
+Each line is one JSON object and includes a `type` field. Common values:
+
+| `type` | Meaning | Typical extra fields |
+|--------|---------|----------------------|
+| `text` | Model text tokens | `content` |
+| `thought` | Reasoning / thought chain (when enabled) | `content` |
+| `tool_status` | Tool execution status | `status` (e.g. `running` / `success` / `error`), `content` |
+| `tool_confirmation` | Tool call waiting for user confirmation | `call_id`, `tool_name`, `full_tool_name`, `arguments` |
+| `error` | Error message | `content` |
+
+Clients should `json.loads` each line and branch on `type`.
+
+### `curl` example
+
+```bash
+export MIRAI_SERVER_URL="${MIRAI_SERVER_URL:-http://127.0.0.1:8000}"
+
+curl -sN -X POST "$MIRAI_SERVER_URL/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Introduce yourself in one sentence.","session_id":"api-demo","think":false}'
+```
+
+`-N` disables buffering so streamed lines appear as they arrive.
+
+### Working with `POST /tools/confirm`
+
+When the stream emits `type: tool_confirmation`, the web UI calls the confirm endpoint; custom clients must call `POST /tools/confirm` with the user’s decision or the confirmation may time out and be denied. Request body fields are documented in OpenAPI and in `ToolConfirmationResponse` in the source.
+
+---
+
+## Other common HTTP routes (core)
+
+All paths are relative to the core base URL (e.g. `http://127.0.0.1:8000`).
+
+### Health
+
+- `GET /health` — JSON with `status`, `remote_access_enabled`, `relay_connected`, etc.
+
+### Multi-tenant routes (enterprise only)
+
+`mirai-agent` (this OSS package) is single-user / LAN. Multi-tenant routes (`/tenancy/*`, `/admin/*`, `/auth/*`, `/relay/*`, `/telegram/link`, `/line/link`, …) are added by the closed-source `mirai-enterprise` plugin via the `mirai.core.plugins` port system. See [UPGRADING_TO_ENTERPRISE.md](UPGRADING_TO_ENTERPRISE.md) for details.
+
+### Sessions and memory
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/clear` | Clear a session; query `session_id` (default `default`) |
+| `GET` | `/memory/sessions` | List sessions; query `status` (default `active`) |
+| `POST` | `/memory/sessions` | Create session; optional JSON `title` |
+| `GET` | `/memory/sessions/{session_id}` | Get one session |
+| `PUT` | `/memory/sessions/{session_id}` | Update session (title, pin, status, …) |
+| `GET` | `/memory/messages` | Paginated messages; `session_id`, `limit`, `offset` |
+| `GET` | `/memory/messages/{message_id}` | One message |
+| `POST` | `/memory/messages` | Create message; JSON: `session_id`, `role`, `content` |
+| `PUT` | `/memory/messages/{message_id}` | Update message |
+| `DELETE` | `/memory/messages/{message_id}` | Delete message |
+| `GET` | `/memory/search` | Semantic search; **required** query `query`; optional `session_id`, `limit` |
+
+### Config and tools
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` / `PUT` / `DELETE` | `/config/system-prompt` | Global system prompt; `PUT` body `{"system_prompt":"..."}` |
+| `GET` / `PUT` | `/config/model` | Read/update model and memory-related settings; `PUT` may include `openai_api_key`, `gemini_api_key`, `claude_api_key`, `openai_base_url` (non-empty values are saved to `~/.mirai/config.json`; `GET` never returns raw keys, only `*_saved` / `*_effective` flags and `openai_base_url`) |
+| `GET` / `PUT` / `DELETE` | `/config/session-prompt/{session_id}` | Per-session system prompt override |
+| `GET` / `PUT` | `/config/ui` | UI preferences (e.g. dark mode) |
+| `GET` | `/tools` | List server and connected Edge tools |
+| `POST` | `/tools/toggle` | Enable/disable tool: `{"tool_name":"...","disabled":true}` |
+| `POST` | `/tools/set-confirmation` | Tool confirmation policy |
+| `POST` | `/tools/confirm` | Respond to `tool_confirmation` stream events |
+| Various | `/tools/...`, `/tools/edge/...` | Tool source and Edge file CRUD (see OpenAPI) |
+
+### Error responses (structured `detail`)
+
+Many endpoints return FastAPI’s `{"detail": ...}` body. For model configuration and related failures, `detail` is often an object with:
+
+| Field | Meaning |
+|-------|---------|
+| `code` | Stable machine-readable identifier (e.g. `MIRAI_MISSING_OPENAI_KEY`, `MIRAI_OLLAMA_UNAVAILABLE`, `MIRAI_UNKNOWN_PROVIDER`, `MIRAI_PROVIDER_MODEL_APPLY_FAILED`) |
+| `message` | Short user-facing explanation |
+| `hint` | Optional remediation (env var, config path, etc.) |
+
+Legacy string-only `detail` values still appear for older routes. Validation errors (`422`) may return `detail` as a list of field errors.
+
+### Monitoring (topology and tool traces)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/monitor/topology` | Server label metadata, `local_tool_count`, and `edges[]` (`edge_name`, `online`, `tool_count`) |
+| `GET` | `/monitor/traces` | Recent tool invocations; query `session_id` (optional), `limit` (1–500, default 100) |
+| `GET` | `/monitor/traces/export` | NDJSON download of traces (optional `session_id`); same filter as list |
+
+Traces may be mirrored to `~/.mirai/tool_traces.jsonl` on disk (append-only); the in-memory buffer is also bounded.
+
+### Timer events (NDJSON stream)
+
+- `GET /timer-events` — long-lived stream, `application/x-ndjson`, for timer pushes (includes `heartbeat`).
+
+---
+
+## Relay gateway (`MIRAI_ENABLE_RELAY=1`)
+
+After the core registers with Relay, remote clients should use the **Relay HTTP base URL**, not `http://127.0.0.1` on the core machine.
+
+### Authentication
+
+For most routes, send:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Obtain `access_token` from `POST /v1/bootstrap` using a join code; see `BootstrapRequest` in `mirai/relay/app.py`.
+
+### Path mapping
+
+Relay prefixes core paths with `/v1`, for example:
+
+| Core (local) | Relay (remote) |
+|----------------|----------------|
+| `POST /chat` | `POST /v1/chat` |
+| `POST /clear` | `POST /v1/clear` |
+| `GET /config/system-prompt` | `GET /v1/config/system-prompt` |
+| `GET /memory/search?query=...` | `GET /v1/memory/search?query=...` |
+| `GET /monitor/topology` | `GET /v1/monitor/topology` |
+| `GET /monitor/traces` | `GET /v1/monitor/traces` |
+| `GET /monitor/traces/export` | `GET /v1/monitor/traces/export` |
+
+**Scopes:** chat typically requires `chat` or `ui` on the token; memory admin routes often require `ui`. See Relay and `verify_relay_access_token` for details.
+
+### Relay health
+
+- `GET /health` — Relay process status (not the same as the core `/health`).
+
+---
+
+## Trying the API manually
+
+Run `mirai --server` locally first, and complete `mirai --setup` (or set model-related environment variables). The **`POST /chat`** section above documents the NDJSON line protocol and includes a **curl** example. Interactive exploration: open `/docs` on the running server.
+
+---
+
+## Stability notes
+
+Mirai is still in the **0.x** stage. For HTTP integrations, treat the documented routes in this file and the generated OpenAPI schema as the intended public contract. Internal Python modules and undocumented routes may change between releases.

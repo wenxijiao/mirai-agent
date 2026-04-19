@@ -1,0 +1,49 @@
+use crate::types::RegisterOptions;
+use serde_json::{json, Value};
+
+pub fn build_tool_schema(opts: &RegisterOptions) -> Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    for p in &opts.parameters {
+        properties.insert(
+            p.name.clone(),
+            json!({
+                "type": p.type_name,
+                "description": p.description,
+            }),
+        );
+        let is_required = p.required.unwrap_or(true);
+        if is_required {
+            required.push(p.name.clone());
+        }
+    }
+
+    let mut schema = json!({
+        "type": "function",
+        "function": {
+            "name": opts.name,
+            "description": opts.description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+            }
+        }
+    });
+
+    if let Some(t) = opts.timeout {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("timeout".to_string(), json!(t));
+    }
+    if opts.require_confirmation {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("require_confirmation".to_string(), json!(true));
+    }
+
+    schema
+}

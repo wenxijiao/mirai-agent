@@ -1,0 +1,97 @@
+"""Timer scheduling helpers extracted from api.py."""
+
+import asyncio
+import logging
+
+from mirai.core.api.state import TIMER_SUBSCRIBERS, TIMER_TASKS
+
+logger = logging.getLogger(__name__)
+from mirai.tools.timer_tools import ACTIVE_TIMERS as TIMER_DATA
+from mirai.tools.timer_tools import calc_next_recurring_delay
+
+
+async def _timer_fire(timer_id: str, delay: int, description: str, session_id: str):
+    logger.info(
+        "Timer sleeping %ss then firing (timer_id=%s session_id=%s desc=%r)",
+        delay,
+        timer_id,
+        session_id,
+        description[:80],
+    )
+    await asyncio.sleep(delay)
+
+    logger.info("Timer fired (timer_id=%s session_id=%s)", timer_id, session_id)
+
+    schedule = TIMER_DATA.get(timer_id)
+    recurring = schedule.get("recurring", False) if schedule else False
+
+    if not recurring:
+        TIMER_DATA.pop(timer_id, None)
+    TIMER_TASKS.pop(timer_id, None)
+
+    from mirai.core.api.chat import generate_chat_events
+
+    prompt = (
+        f"[Timer expired — scheduled action]\n"
+        f"Planned task: {description}\n"
+        f"Now execute it: call tools (get_weather, web_search, set_timer, etc.) as needed, "
+        f"then answer the user in the same language. Do not only apologize—complete the task."
+    )
+    collected: list[dict] = []
+    try:
+        async for event in generate_chat_events(prompt, session_id):
+            collected.append(event)
+    except Exception as exc:
+        collected.append({"type": "error", "content": str(exc)})
+
+    from mirai.line.notify import send_timer_result_to_line
+    from mirai.telegram.notify import send_timer_result_to_telegram
+
+    await send_timer_result_to_telegram(session_id, description, collected)
+    await send_timer_result_to_line(session_id, description, collected)
+
+    payload = {
+        "timer_id": timer_id,
+        "description": description,
+        "session_id": session_id,
+        "events": collected,
+    }
+    from mirai.core.plugins import get_session_scope
+
+    owner = get_session_scope().owner_user_from_session_id(session_id)
+    for sub in list(TIMER_SUBSCRIBERS):
+        if isinstance(sub, tuple):
+            q, subscriber_user = sub
+        else:
+            q, subscriber_user = sub, None
+        if subscriber_user is not None and subscriber_user != owner:
+            continue
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            pass
+
+    if recurring and schedule:
+        from mirai.tools.timer_tools import _save_schedules
+
+        next_delay = calc_next_recurring_delay(schedule)
+        _save_schedules()
+        schedule_timer(timer_id, next_delay, description, session_id)
+
+
+def schedule_timer(timer_id: str, delay: int, description: str, session_id: str):
+    logger.info(
+        "Timer scheduled: timer_id=%s delay=%ss session_id=%s",
+        timer_id,
+        delay,
+        session_id,
+    )
+    loop = asyncio.get_running_loop()
+    task = loop.create_task(_timer_fire(timer_id, delay, description, session_id))
+    TIMER_TASKS[timer_id] = task
+
+
+def cancel_timer(timer_id: str):
+    task = TIMER_TASKS.pop(timer_id, None)
+    if task and not task.done():
+        task.cancel()

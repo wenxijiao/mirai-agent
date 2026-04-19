@@ -1,0 +1,116 @@
+# Upgrading from `mirai-agent` (OSS) to `mirai-enterprise`
+
+The OSS `mirai-agent` package is a complete, single-user / LAN agent. You
+do not need anything else to chat with an agent, register tools across
+eleven languages, or run a personal Telegram / LINE bot.
+
+If you reach a point where you need any of the following, the closed-source
+companion package `mirai-enterprise` is what you want:
+
+- multi-user identity (per-user `Bearer` tokens, signup / login / refresh)
+- per-user quotas, billing, and audit
+- PostgreSQL-backed storage instead of local SQLite
+- the public **relay server** for remote pairing across NATs
+- the admin HTTP API + interactive admin CLI
+- per-user data-key encryption
+
+This document explains how the two packages relate, and what you have to
+change to switch.
+
+## Architecture in one paragraph
+
+The OSS core defines a **plugin port** layer at
+[`mirai/core/plugins/`](../mirai/core/plugins/) — small abstract interfaces
+for identity, quotas, billing, session scoping, bot pooling, memory
+factory, edge scoping, audit, route extension, and middleware extension.
+The OSS package registers permissive single-user defaults for every port.
+`mirai-enterprise` ships an `entry_point` (group `mirai.plugins`) named
+`enterprise` that, on first import of the OSS app, swaps in real
+implementations and mounts the extra HTTP routes (`/admin/*`, `/auth/*`,
+`/tenancy/*`, `/relay/*`) onto the same FastAPI app.
+
+This means:
+
+- **The OSS core never imports enterprise code.** It is fully usable
+  without the private package installed.
+- **The enterprise package depends on the OSS package.** Bug fixes and
+  features added to OSS are immediately available to the enterprise build,
+  no copy-paste required.
+- **One FastAPI app**, two binaries: `mirai --server` is the OSS shape,
+  `mirai-enterprise serve` is the same shape plus the registered plugin.
+
+## Switching from OSS to Enterprise
+
+1. **Get access to the private wheel / image.** The enterprise package is
+   not on PyPI. Ask the maintainers for the private registry URL.
+
+2. **Install the image (recommended)** or wheel:
+
+   ```bash
+   # Recommended: Docker
+   docker pull ${REGISTRY_URL}/mirai-enterprise:latest
+
+   # Or, on a Python host (private wheel)
+   pip install mirai-agent==0.2.*           # OSS, from PyPI
+   pip install /path/to/mirai_enterprise-*.whl --no-deps
+   ```
+
+3. **Provision Postgres** and set `MIRAI_DB_URL`. Generate
+   `MIRAI_SECRET_KEY` (≥ 32 random bytes) and `MIRAI_KEK` (base64 32-byte
+   key). Store both in your secrets manager.
+
+4. **Migrate existing local data** (optional, only if you used
+   `mirai --server` previously and want to keep the per-user blobs):
+
+   ```bash
+   mirai-enterprise db-upgrade
+   mirai-enterprise migrate-tenancy \
+       --sqlite-tenancy-path ~/.mirai/tenancy.db \
+       --postgres-url "$MIRAI_DB_URL"
+   ```
+
+5. **Start the enterprise server.** Use `mirai-enterprise serve` instead
+   of `mirai --server`:
+
+   ```bash
+   mirai-enterprise serve            # API + LINE sidecar
+   mirai-enterprise relay            # optional: public relay daemon
+   ```
+
+6. **Bootstrap the first tenant + admin user**:
+
+   ```bash
+   mirai-enterprise tenant-create "Primary"
+   mirai-enterprise user-add <TENANT_ID> "admin@example.com"
+   mirai-enterprise user-set-scope <USER_ID> admin
+   mirai-enterprise user-token <USER_ID>     # prints mirai_… Bearer
+   ```
+
+7. **Tell every client to send `Authorization: Bearer mirai_…`.** The OSS
+   bots (`mirai --telegram`, `mirai --line`, `mirai --edge`) accept
+   `MIRAI_USER_ACCESS_TOKEN` for this purpose. The Telegram bot also
+   accepts `/link <token>` over the chat itself.
+
+See `docs/MULTI_TENANT.md` and `deploy/README.md` in the private
+`mirai-enterprise` repo for the full operations guide.
+
+## Going back to OSS
+
+`mirai-enterprise` is additive. Stopping the enterprise binary and starting
+`mirai --server` yields the original single-user behaviour — no migration
+needed. The Postgres database keeps your data; you can resume enterprise
+mode at any time.
+
+## Compatibility promise
+
+`mirai-enterprise` pins a narrow OSS range (`mirai-agent>=0.2,<0.3`).
+Within that range the OSS team commits to:
+
+- not removing or renaming any class in `mirai.core.plugins`
+- not changing the on-the-wire shape of `/health`, `/chat`, `/config/*`,
+  `/ws/edge`
+- bumping the OSS minor version when introducing breaking changes that
+  the enterprise plugin would have to follow
+
+Any change that would break the enterprise plugin must come with a
+matching enterprise release on the same day.
