@@ -16,7 +16,7 @@ from __future__ import annotations
 
 __all__ = ["__version__", "MiraiAgent", "register", "run", "stop"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from mirai.sdk import MiraiAgent as MiraiAgent
 
