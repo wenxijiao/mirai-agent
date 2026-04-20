@@ -62,6 +62,7 @@ from mirai.core.api.state import (
     resolve_edge_for_prefixed_tool_name,
     stream_event,
 )
+from mirai.core.api.task_logging import log_task_exc_on_done
 from mirai.core.api.timers import cancel_timer, schedule_timer
 from mirai.core.api.uploads import decode_upload_payload, save_uploaded_file
 from mirai.core.audit import audit_event
@@ -156,7 +157,8 @@ async def lifespan(app: FastAPI):
 
     def _on_sigterm() -> None:
         _state.server_draining = True
-        _loop.create_task(_broadcast_edge_drain())
+        t = _loop.create_task(_broadcast_edge_drain())
+        log_task_exc_on_done(t, "broadcast_edge_drain")
 
     try:
         _loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
@@ -327,9 +329,7 @@ async def get_memory_session_endpoint(identity: CurrentIdentity, session_id: str
 
 
 @app.put("/memory/sessions/{session_id}")
-async def update_memory_session_endpoint(
-    identity: CurrentIdentity, session_id: str, request: SessionUpdateRequest
-):
+async def update_memory_session_endpoint(identity: CurrentIdentity, session_id: str, request: SessionUpdateRequest):
     sid = get_session_scope().qualify_session_http(identity, session_id)
     try:
         session = get_memory_store_for_identity(identity).update_session(
@@ -391,9 +391,7 @@ async def create_memory_message_endpoint(identity: CurrentIdentity, request: Mem
 
 
 @app.put("/memory/messages/{message_id}")
-async def update_memory_message_endpoint(
-    identity: CurrentIdentity, message_id: str, request: MemoryUpdateRequest
-):
+async def update_memory_message_endpoint(identity: CurrentIdentity, message_id: str, request: MemoryUpdateRequest):
     existing = get_memory_store_for_identity(identity).get_message(message_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Memory message not found.")
@@ -581,9 +579,7 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
     if request.chat_provider and request.chat_provider not in SUPPORTED_PROVIDERS:
         raise unknown_provider_http(role="chat", name=request.chat_provider, supported=SUPPORTED_PROVIDERS)
     if request.embedding_provider and request.embedding_provider not in SUPPORTED_PROVIDERS:
-        raise unknown_provider_http(
-            role="embedding", name=request.embedding_provider, supported=SUPPORTED_PROVIDERS
-        )
+        raise unknown_provider_http(role="embedding", name=request.embedding_provider, supported=SUPPORTED_PROVIDERS)
 
     backup_before = CONFIG_PATH.read_text(encoding="utf-8") if CONFIG_PATH.exists() else None
 
@@ -634,9 +630,7 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         _restore_config_file(backup_before)
         raise provider_not_ready_http(exc) from exc
 
-    need_reinit = provider_changed or (
-        keys_or_base_changed and config.chat_provider in ("openai", "gemini", "claude")
-    )
+    need_reinit = provider_changed or (keys_or_base_changed and config.chat_provider in ("openai", "gemini", "claude"))
 
     if _state.bot:
         try:
@@ -666,9 +660,7 @@ async def get_session_prompt_endpoint(identity: CurrentIdentity, session_id: str
 
 
 @app.put("/config/session-prompt/{session_id}")
-async def update_session_prompt_endpoint(
-    identity: CurrentIdentity, session_id: str, request: SessionPromptRequest
-):
+async def update_session_prompt_endpoint(identity: CurrentIdentity, session_id: str, request: SessionPromptRequest):
     sid = get_session_scope().qualify_session_http(identity, session_id)
     prompt = set_session_prompt(sid, request.system_prompt)
     return {"status": "success", "session_id": sid, "system_prompt": prompt}

@@ -69,10 +69,7 @@ def _prompt_telegram_bot_token_if_missing() -> bool:
     if get_telegram_bot_token():
         return True
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        print(
-            "\n  Telegram bot token required. Set TELEGRAM_BOT_TOKEN or "
-            f"add telegram_bot_token to {CONFIG_PATH}\n"
-        )
+        print(f"\n  Telegram bot token required. Set TELEGRAM_BOT_TOKEN or add telegram_bot_token to {CONFIG_PATH}\n")
         return False
     print()
     print("  No Telegram bot token found.")
@@ -546,9 +543,7 @@ def run_edge(lang: str | list[str] | None = None):
         masked = existing_code[:8] + "..." + existing_code[-4:] if len(existing_code) > 12 else existing_code
         print(f"  Connection code: {masked}")
     else:
-        code = input(
-            "  Enter a connection code (LAN mirai-lan_...), or press Enter to skip: "
-        ).strip()
+        code = input("  Enter a connection code (LAN mirai-lan_...), or press Enter to skip: ").strip()
         if code:
             _write_connection_code(env_path, code)
             if _is_lan_code(code):
@@ -706,9 +701,7 @@ def _run_demo():
     if is_server_running(server_health_url()):
         print("  Local server detected at http://127.0.0.1:8000")
     else:
-        code = _prompt_connection_code(
-            "Enter a LAN connection code (mirai-lan_...), or press Enter for localhost: "
-        )
+        code = _prompt_connection_code("Enter a LAN connection code (mirai-lan_...), or press Enter for localhost: ")
 
     from mirai.demo.launcher import run_demo_suite
 
@@ -858,17 +851,9 @@ def main():
         raise SystemExit("  Use either --telegram or --line, not both.")
 
     if (args.telegram or args.line) and (
-        args.ui
-        or args.chat
-        or args.edge
-        or args.demo
-        or args.setup
-        or args.cleanup
-        or args.cleanup_memory
+        args.ui or args.chat or args.edge or args.demo or args.setup or args.cleanup or args.cleanup_memory
     ):
-        raise SystemExit(
-            "  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup."
-        )
+        raise SystemExit("  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup.")
 
     try:
         if args.server and args.telegram:

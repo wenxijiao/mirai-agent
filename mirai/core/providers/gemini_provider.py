@@ -184,18 +184,12 @@ def _openai_content_to_gemini_parts(content: Any) -> list[Any]:
                     m = re.match(r"data:([^;]+)", header)
                     mime = m.group(1) if m else "image/jpeg"
                     raw = base64.standard_b64decode(b64)
-                    parts.append(
-                        types.Part(inline_data=types.Blob(mime_type=mime, data=raw))
-                    )
+                    parts.append(types.Part(inline_data=types.Blob(mime_type=mime, data=raw)))
                 except Exception as exc:
                     _logger.warning("Gemini: could not decode inline image: %s", exc)
                     parts.append(types.Part(text="[image could not be decoded]"))
             else:
-                parts.append(
-                    types.Part(
-                        text=f"[remote image URL not inlined; paste or upload to Mirai: {url[:120]}]"
-                    )
-                )
+                parts.append(types.Part(text=f"[remote image URL not inlined; paste or upload to Mirai: {url[:120]}]"))
         else:
             parts.append(types.Part(text=str(block)))
 

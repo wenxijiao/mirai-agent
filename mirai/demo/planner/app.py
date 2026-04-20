@@ -213,7 +213,9 @@ def update_event(
         y, m, _ = map(int, ev["date"].split("-"))
         PLANNER["view_year"], PLANNER["view_month"] = y, m
     _log(f"~ {ev['title']}")
-    return f"Updated event: {ev['title']} on {ev['date']} at {ev['time']} ({ev['duration_minutes']}m, {ev['category']})."
+    return (
+        f"Updated event: {ev['title']} on {ev['date']} at {ev['time']} ({ev['duration_minutes']}m, {ev['category']})."
+    )
 
 
 def get_schedule(date_str: str) -> str:

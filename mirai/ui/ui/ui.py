@@ -51,6 +51,7 @@ def _format_http_error_detail(body: dict) -> str:
         return detail
     return str(body.get("detail", ""))
 
+
 # Reflex handles one state event at a time. While ``send_message`` is an async
 # generator, ``confirm_tool_decision`` cannot run. We pause the stream by
 # returning from ``send_message`` and resume consumption in ``confirm_tool_decision``.
@@ -1972,7 +1973,11 @@ def _message_item(msg) -> rx.Component:
 def _streaming_msg() -> rx.Component:
     return rx.hstack(
         rx.avatar(
-            fallback="M", size="2", variant="solid", color_scheme="iris", radius="full",
+            fallback="M",
+            size="2",
+            variant="solid",
+            color_scheme="iris",
+            radius="full",
             style={"flex_shrink": "0", "margin-top": "2px"},
         ),
         rx.box(
@@ -2074,7 +2079,11 @@ def _suggestion(emoji: str, title: str, prompt_text: str) -> rx.Component:
         border="1px solid var(--border)",
         border_radius="10px",
         cursor="pointer",
-        _hover={"background": "var(--bg-hover)", "border_color": "var(--border-hover)", "box_shadow": "var(--shadow-sm)"},
+        _hover={
+            "background": "var(--bg-hover)",
+            "border_color": "var(--border-hover)",
+            "box_shadow": "var(--shadow-sm)",
+        },
         transition="all 0.15s",
         on_click=State.use_suggestion(prompt_text),
     )
@@ -2089,9 +2098,7 @@ def _empty_state() -> rx.Component:
                 background="var(--accent-soft)",
                 border_radius="16px",
             ),
-            rx.heading(
-                "Hi, how can I help?", size="5", weight="medium", color="var(--heading)", text_align="center"
-            ),
+            rx.heading("Hi, how can I help?", size="5", weight="medium", color="var(--heading)", text_align="center"),
             rx.hstack(
                 _suggestion("💡", "Explain something", "Explain quantum computing in simple terms"),
                 _suggestion("✍️", "Help me write", "Draft a professional email about project updates"),
@@ -2466,7 +2473,12 @@ def _chat_input() -> rx.Component:
                             content=rx.cond(State.think_enabled, "Deep thinking on", "Enable deep thinking"),
                         ),
                         rx.spacer(),
-                        rx.text("Shift+Enter for new line", size="1", color="var(--text-3)", display=["none", "none", "block"]),
+                        rx.text(
+                            "Shift+Enter for new line",
+                            size="1",
+                            color="var(--text-3)",
+                            display=["none", "none", "block"],
+                        ),
                         spacing="2",
                         align="center",
                         padding_top="4px",
@@ -3818,7 +3830,9 @@ def _monitor_main() -> rx.Component:
         rx.box(
             rx.vstack(
                 rx.hstack(
-                    rx.text("Time (UTC)", size="1", weight="bold", color="var(--text-3)", width="150px", flex_shrink="0"),
+                    rx.text(
+                        "Time (UTC)", size="1", weight="bold", color="var(--text-3)", width="150px", flex_shrink="0"
+                    ),
                     rx.text("Tool", size="1", weight="bold", color="var(--text-3)", width="180px", flex_shrink="0"),
                     rx.text("Arguments", size="1", weight="bold", color="var(--text-3)", flex="1", min_width="0"),
                     rx.text("Duration", size="1", weight="bold", color="var(--text-3)", width="72px", flex_shrink="0"),

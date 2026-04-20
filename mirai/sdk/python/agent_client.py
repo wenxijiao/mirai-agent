@@ -35,6 +35,7 @@ def _reconnect_delay_sec_with_jitter(delay_sec: int) -> float:
     jitter = random.randint(-500, 500)
     return max(1.0, (base_ms + jitter) / 1000.0)
 
+
 # ── auth constants ──
 
 _TOKEN_PREFIX = "mirai_"

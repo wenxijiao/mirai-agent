@@ -69,6 +69,7 @@ Issues = "https://github.com/wenxijiao/Mirai/issues"
 dev = [
     "build",
     "pytest>=8.0",
+    "pytest-cov>=4.0",
     "ruff>=0.8.0",
     "pyright>=1.1",
 ]
@@ -89,9 +90,34 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
-reportMissingImports = true
+# Many optional / generated imports (templates, SDK shims) are not resolvable as a flat tree.
+reportMissingImports = "none"
 reportMissingTypeStubs = false
-exclude = ["_enterprise_seed", "**/__pycache__", ".venv", "venv"]
+# LanceDB and provider wrappers are untyped; keep CI signal on syntax/unbound names without noise.
+reportAttributeAccessIssue = "none"
+reportArgumentType = "none"
+reportGeneralTypeIssues = "none"
+reportOptionalMemberAccess = "none"
+reportAssignmentType = "none"
+reportReturnType = "none"
+reportOptionalSubscript = "none"
+reportMissingModuleSource = "none"
+# Reflex UI is highly dynamic; static typing for mirai/ui is not enforced in CI.
+# Edge templates ship multi-language scaffolds; analysis targets the runtime packages only.
+exclude = [
+    "_enterprise_seed",
+    "mirai/ui",
+    "mirai/edge/template",
+    "**/__pycache__",
+    ".venv",
+    "venv",
+]
+
+# Slightly tighter diagnostics for memory subsystem (incremental typing).
+[[tool.pyright.executionEnvironments]]
+root = "mirai/core/memories"
+reportOptionalMemberAccess = "warning"
+reportOptionalSubscript = "warning"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

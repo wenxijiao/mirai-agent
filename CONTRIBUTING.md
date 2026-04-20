@@ -8,6 +8,7 @@ Thank you for your interest in contributing. This document describes how to set 
 # After forking, replace <your-user> with your GitHub username:
 git clone https://github.com/<your-user>/Mirai.git
 cd Mirai
+# If you cloned into a different folder name (e.g. mirai-agent), use that path instead of `Mirai`.
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -27,7 +28,9 @@ See [docs/TESTING.md](docs/TESTING.md) for context. From the repository root:
 pytest
 ```
 
-CI (see [.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on each push and PR: Python (`compileall`, `ruff`, `pytest`), plus TypeScript, C++, Go, Swift, and Java SDK builds.
+CI (see [.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on each push and PR: Python (`compileall`, `ruff` check + format check, `pytest`, `pytest --cov=mirai.core.api`, `pyright`), plus TypeScript, C++, Go, Swift, Java, Rust, Kotlin, Dart, and C# SDK builds.
+
+The canonical upstream for issues and PRs is [github.com/wenxijiao/Mirai](https://github.com/wenxijiao/Mirai) (use your fork’s `git clone` URL locally as above).
 
 ## Releases (PyPI & npm)
 

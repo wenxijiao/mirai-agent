@@ -19,9 +19,7 @@ def _session_prompt_path(session_id: str) -> str:
     return f"/config/session-prompt/{quote(session_id, safe='/')}"
 
 
-async def http_get_session_prompt(
-    connection: ConnectionConfig, session_id: str
-) -> tuple[dict[str, Any] | None, str]:
+async def http_get_session_prompt(connection: ConnectionConfig, session_id: str) -> tuple[dict[str, Any] | None, str]:
     url = _api_url(connection, _session_prompt_path(session_id))
     headers = connection.auth_headers()
     timeout = httpx.Timeout(10.0, read=30.0)
@@ -45,9 +43,7 @@ async def http_get_global_system_prompt(
         return r.json(), ""
 
 
-async def http_put_session_prompt(
-    connection: ConnectionConfig, session_id: str, text: str
-) -> tuple[bool, str]:
+async def http_put_session_prompt(connection: ConnectionConfig, session_id: str, text: str) -> tuple[bool, str]:
     url = _api_url(connection, _session_prompt_path(session_id))
     headers = {**connection.auth_headers(), "Content-Type": "application/json"}
     timeout = httpx.Timeout(10.0, read=30.0)
@@ -58,9 +54,7 @@ async def http_put_session_prompt(
         return True, ""
 
 
-async def http_delete_session_prompt(
-    connection: ConnectionConfig, session_id: str
-) -> tuple[bool, str]:
+async def http_delete_session_prompt(connection: ConnectionConfig, session_id: str) -> tuple[bool, str]:
     url = _api_url(connection, _session_prompt_path(session_id))
     headers = connection.auth_headers()
     timeout = httpx.Timeout(10.0, read=30.0)

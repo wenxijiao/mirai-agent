@@ -589,5 +589,3 @@ class SmartHomeGUI:
 
     def run(self):
         self._root.mainloop()
-
-

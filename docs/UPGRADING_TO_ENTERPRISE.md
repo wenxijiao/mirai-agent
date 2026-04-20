@@ -59,14 +59,11 @@ This means:
    `MIRAI_SECRET_KEY` (≥ 32 random bytes) and `MIRAI_KEK` (base64 32-byte
    key). Store both in your secrets manager.
 
-4. **Migrate existing local data** (optional, only if you used
-   `mirai --server` previously and want to keep the per-user blobs):
+4. **Apply database migrations** (empty Postgres or first deploy):
 
    ```bash
+   export MIRAI_DB_URL="postgresql://user:pass@host:5432/dbname"
    mirai-enterprise db-upgrade
-   mirai-enterprise migrate-tenancy \
-       --sqlite-tenancy-path ~/.mirai/tenancy.db \
-       --postgres-url "$MIRAI_DB_URL"
    ```
 
 5. **Start the enterprise server.** Use `mirai-enterprise serve` instead

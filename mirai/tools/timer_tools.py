@@ -13,12 +13,14 @@ try:
     from mirai.core.api.chat_context import get_chat_owner_user_id
 except ImportError:
 
-    def get_chat_owner_user_id():  # pragma: no cover
+    def get_chat_owner_user_id() -> str:  # pragma: no cover
         return "_local"
 
 
 def _owner_id() -> str:
     return get_chat_owner_user_id()
+
+
 _SCHEDULES_PATH = Path.home() / ".mirai" / "schedules.json"
 
 _schedule_callback: Callable | None = None

@@ -25,9 +25,7 @@ def test_tool_confirm_card_shape():
     assert bubble["type"] == "bubble"
     assert bubble["body"]["type"] == "box"
     foot = bubble["footer"]["contents"]
-    assert any(
-        b.get("type") == "button" and b.get("action", {}).get("type") == "postback" for b in foot[-1:]
-    )
+    assert any(b.get("type") == "button" and b.get("action", {}).get("type") == "postback" for b in foot[-1:])
 
 
 def test_flex_messages_under_50kb():

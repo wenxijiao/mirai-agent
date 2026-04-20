@@ -166,9 +166,7 @@ def init_workspace(
                 if not lang_code:
                     continue
                 if lang_code not in _SUPPORTED_LANGS:
-                    raise ValueError(
-                        f"Unsupported language: {lang_code!r}. Supported: {', '.join(_SUPPORTED_LANGS)}"
-                    )
+                    raise ValueError(f"Unsupported language: {lang_code!r}. Supported: {', '.join(_SUPPORTED_LANGS)}")
                 langs.append(lang_code)
         seen: set[str] = set()
         langs = [x for x in langs if not (x in seen or seen.add(x))]

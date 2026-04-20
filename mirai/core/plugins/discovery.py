@@ -49,9 +49,7 @@ def load_entry_point_plugins() -> list[str]:
             elif hasattr(target, "register") and callable(target.register):
                 target.register()
             else:
-                _log.warning(
-                    "mirai plugin %s did not expose a register() callable", ep.name
-                )
+                _log.warning("mirai plugin %s did not expose a register() callable", ep.name)
                 continue
             _loaded.add(ep.name)
             invoked.append(ep.name)

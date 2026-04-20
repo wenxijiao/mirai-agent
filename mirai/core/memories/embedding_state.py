@@ -22,9 +22,7 @@ class _MeteringEmbedWrapper:
             from mirai.core.plugins import get_current_identity, get_quota_policy
 
             est = max(1, len(text) // 4)
-            get_quota_policy().record_embed_tokens(
-                get_current_identity(), est, model=model or "unknown"
-            )
+            get_quota_policy().record_embed_tokens(get_current_identity(), est, model=model or "unknown")
         except Exception:
             pass
         return out

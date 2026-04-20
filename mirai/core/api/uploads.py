@@ -54,9 +54,7 @@ _ALLOWED_EXTENSIONS = frozenset(
     }
 )
 
-IMAGE_EXTENSIONS = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico"}
-)
+IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico"})
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 

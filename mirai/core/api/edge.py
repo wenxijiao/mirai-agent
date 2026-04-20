@@ -84,7 +84,7 @@ async def _push_confirmation_policy_to_edge_peer(peer, connection_key: str, tool
     for full in tools_dict:
         if not full.startswith(prefix):
             continue
-        short = full[len(prefix):]
+        short = full[len(prefix) :]
         if full in ALWAYS_ALLOWED_TOOLS:
             always.append(short)
         if full in CONFIRMATION_TOOLS:
@@ -114,9 +114,7 @@ def cleanup_edge_connection(connection_key: str, peer):
             continue
         future = pending["future"]
         if not future.done():
-            future.set_exception(
-                ConnectionError(f"Edge device '{connection_key}' disconnected during tool execution.")
-            )
+            future.set_exception(ConnectionError(f"Edge device '{connection_key}' disconnected during tool execution."))
         PENDING_TOOL_CALLS.pop(call_id, None)
 
     for op_id, pending in list(PENDING_EDGE_OPS.items()):

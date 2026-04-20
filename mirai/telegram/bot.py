@@ -198,9 +198,7 @@ def build_application():
             await update.message.reply_text(_truncate_for_telegram(f"Link request failed: {exc}"))
             return
         if r.status_code >= 400:
-            await update.message.reply_text(
-                _truncate_for_telegram(f"Link failed ({r.status_code}): {r.text[:500]}")
-            )
+            await update.message.reply_text(_truncate_for_telegram(f"Link failed ({r.status_code}): {r.text[:500]}"))
             return
         save_token_for_telegram_user(int(tg_uid), token)
         await update.message.reply_text("已成功关联。现在可以正常对话（多租户下将使用你的 Mirai 用户身份）。")
@@ -480,9 +478,7 @@ def build_application():
                         elif et == "error":
                             await context.bot.send_message(
                                 chat_id=chat_id,
-                                text=_truncate_for_telegram(
-                                    f"Error: {event.get('content', 'Unknown')}"
-                                ),
+                                text=_truncate_for_telegram(f"Error: {event.get('content', 'Unknown')}"),
                             )
 
         if accumulated:
@@ -493,9 +489,7 @@ def build_application():
         if update is not None and getattr(update, "effective_message", None):
             try:
                 await update.effective_message.reply_text(
-                    _truncate_for_telegram(
-                        "Something went wrong. Please try again or check server logs."
-                    )
+                    _truncate_for_telegram("Something went wrong. Please try again or check server logs.")
                 )
             except Exception:
                 pass

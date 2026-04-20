@@ -31,11 +31,7 @@ def line_push_recipient_user_id(session_id: str) -> str | None:
 
 
 def _events_to_plain_text(events: list[dict[str, Any]]) -> str:
-    return "".join(
-        str(e.get("content", ""))
-        for e in events
-        if e.get("type") == "text"
-    ).strip()
+    return "".join(str(e.get("content", "")) for e in events if e.get("type") == "text").strip()
 
 
 async def send_timer_result_to_line(

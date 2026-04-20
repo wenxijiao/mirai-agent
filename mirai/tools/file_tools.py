@@ -7,15 +7,62 @@ from pathlib import Path
 
 MAX_CONTENT_CHARS = 50_000
 _TEXT_EXTENSIONS = {
-    ".txt", ".md", ".markdown", ".rst", ".log", ".ini", ".cfg", ".conf",
-    ".yaml", ".yml", ".toml", ".xml", ".html", ".htm", ".css", ".js",
-    ".ts", ".py", ".java", ".c", ".cpp", ".h", ".hpp", ".go", ".rs",
-    ".rb", ".php", ".sh", ".bash", ".zsh", ".bat", ".ps1", ".sql",
-    ".r", ".m", ".swift", ".kt", ".scala", ".lua", ".pl", ".tex",
-    ".env", ".gitignore", ".dockerignore", ".editorconfig",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".log",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".xml",
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".ts",
+    ".py",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".bat",
+    ".ps1",
+    ".sql",
+    ".r",
+    ".m",
+    ".swift",
+    ".kt",
+    ".scala",
+    ".lua",
+    ".pl",
+    ".tex",
+    ".env",
+    ".gitignore",
+    ".dockerignore",
+    ".editorconfig",
 }
 _IMAGE_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tiff",
+    ".tif",
+    ".ico",
 }
 
 
@@ -40,10 +87,7 @@ def _read_docx(path: Path) -> str:
     try:
         import docx
     except ImportError:
-        return (
-            "Error: python-docx is not installed. "
-            "Install it with: pip install python-docx"
-        )
+        return "Error: python-docx is not installed. Install it with: pip install python-docx"
 
     document = docx.Document(str(path))
     parts: list[str] = []
@@ -65,10 +109,7 @@ def _read_pdf(path: Path) -> str:
     try:
         from PyPDF2 import PdfReader
     except ImportError:
-        return (
-            "Error: PyPDF2 is not installed. "
-            "Install it with: pip install PyPDF2"
-        )
+        return "Error: PyPDF2 is not installed. Install it with: pip install PyPDF2"
 
     reader = PdfReader(str(path))
     pages: list[str] = []
@@ -131,6 +172,7 @@ def read_file(file_path: str) -> str:
         info = f"This is an image file ({ext}). Size: {size:,} bytes."
         try:
             from PIL import Image as _PILImage
+
             with _PILImage.open(path) as img:
                 w, h = img.size
                 info += f" Dimensions: {w}x{h} pixels. Format: {img.format or ext.upper()}."
@@ -209,8 +251,9 @@ def list_files(directory_path: str, pattern: str = "*") -> str:
 
 
 def _format_size(size: int) -> str:
+    n = float(size)
     for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
-        size /= 1024
-    return f"{size:.1f} GB"
+        if n < 1024 or unit == "GB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
+        n /= 1024
+    return f"{n:.1f} GB"

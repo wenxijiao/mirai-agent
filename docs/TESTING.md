@@ -7,6 +7,20 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
+Optional: statement coverage for the HTTP API package only (no threshold; same command as the **Coverage** CI job):
+
+```bash
+python -m pytest --cov=mirai.core.api --cov-report=term-missing
+```
+
+Static analysis (also run in CI):
+
+```bash
+python -m pyright mirai tests
+```
+
+Pyright settings and excludes (for example Reflex UI and edge templates) live under `[tool.pyright]` in the repo root [pyproject.toml](../pyproject.toml). The `mirai/core/memories` tree uses a slightly stricter `executionEnvironments` entry (`reportOptionalMemberAccess` / `reportOptionalSubscript` as warnings) as a first step toward stronger typing there.
+
 Run a single file or match a test name:
 
 ```bash
@@ -21,7 +35,11 @@ Pytest options live under `[tool.pytest.ini_options]` in the repo root [pyprojec
 ## What CI runs
 
 - **`pytest`** over the whole `tests/` tree.
-- **`ruff check mirai tests`** — see [.github/workflows/ci.yml](../.github/workflows/ci.yml).
+- **`ruff check mirai tests`** and **`ruff format --check mirai tests`**
+- **`pyright mirai tests`** (dedicated job; Python 3.12)
+- **`pytest --cov=mirai.core.api`** (dedicated **Coverage** job; Python 3.12; informational, no fail-under gate)
+
+See [.github/workflows/ci.yml](../.github/workflows/ci.yml) for the full matrix (Python 3.10–3.13, SDK builds, Pyright, and coverage).
 
 Optionally install [pre-commit](https://pre-commit.com/) locally; same hooks as described in [CONTRIBUTING.md](../CONTRIBUTING.md).
 

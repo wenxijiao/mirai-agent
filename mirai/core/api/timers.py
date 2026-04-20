@@ -4,10 +4,11 @@ import asyncio
 import logging
 
 from mirai.core.api.state import TIMER_SUBSCRIBERS, TIMER_TASKS
-
-logger = logging.getLogger(__name__)
+from mirai.core.api.task_logging import log_task_exc_on_done
 from mirai.tools.timer_tools import ACTIVE_TIMERS as TIMER_DATA
 from mirai.tools.timer_tools import calc_next_recurring_delay
+
+logger = logging.getLogger(__name__)
 
 
 async def _timer_fire(timer_id: str, delay: int, description: str, session_id: str):
@@ -88,6 +89,7 @@ def schedule_timer(timer_id: str, delay: int, description: str, session_id: str)
     )
     loop = asyncio.get_running_loop()
     task = loop.create_task(_timer_fire(timer_id, delay, description, session_id))
+    log_task_exc_on_done(task, f"timer_fire timer_id={timer_id!r}")
     TIMER_TASKS[timer_id] = task
 
 

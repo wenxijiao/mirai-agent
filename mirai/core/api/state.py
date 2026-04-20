@@ -127,9 +127,7 @@ def get_all_tool_schemas(identity=None):
         if name not in DISABLED_TOOLS:
             all_tools.append(tool_data["schema"])
 
-    edge_extras = get_edge_scope().filter_edge_tool_schemas(
-        identity, EDGE_TOOLS_REGISTRY, DISABLED_TOOLS
-    )
+    edge_extras = get_edge_scope().filter_edge_tool_schemas(identity, EDGE_TOOLS_REGISTRY, DISABLED_TOOLS)
     all_tools.extend(edge_extras)
     return all_tools
 

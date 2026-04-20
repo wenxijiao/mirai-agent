@@ -14,11 +14,11 @@ TOOL_USE_INSTRUCTION = (
     "Do NOT only describe what you would do—make actual tool calls first, then briefly confirm.\n"
     "\n"
     "[Delayed and scheduled actions]\n"
-    "If the user wants something done after a delay (e.g. \"in 1 minute\", \"30 seconds later\") "
+    'If the user wants something done after a delay (e.g. "in 1 minute", "30 seconds later") '
     "or at a clock time / weekday, you MUST call `set_timer` (delay in seconds) or `schedule_task` "
-    "(calendar / recurring). Plain-text promises like \"I will reply in a minute\" do NOT run—"
+    '(calendar / recurring). Plain-text promises like "I will reply in a minute" do NOT run—'
     "only these tools schedule real follow-up work. Put the concrete action in `description` "
-    "(e.g. \"look up weather for Beijing and tell the user\"). When the timer fires, you will "
+    '(e.g. "look up weather for Beijing and tell the user"). When the timer fires, you will '
     "receive another turn to execute that description using tools."
 )
 

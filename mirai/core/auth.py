@@ -68,13 +68,13 @@ def encode_lan_code(code: MiraiLanCode, secret: str | None = None) -> str:
 
 def decode_lan_code(token: str, secret: str | None = None) -> MiraiLanCode:
     if token.startswith(LAN_TOKEN_PREFIX):
-        encoded = token[len(LAN_TOKEN_PREFIX):]
+        encoded = token[len(LAN_TOKEN_PREFIX) :]
     else:
         matched = False
         encoded = ""
         for prefix in _LEGACY_LAN_PREFIXES:
             if token.startswith(prefix):
-                encoded = token[len(prefix):]
+                encoded = token[len(prefix) :]
                 matched = True
                 break
         if not matched:

@@ -415,7 +415,7 @@ async def handle_line_message_event(
             )
             return
         if raw.lower().startswith("/system"):
-            tail = raw[len("/system"):].strip()
+            tail = raw[len("/system") :].strip()
             out = await _line_system_command(user_id, session_id, tail, use_http=use_http)
             await reply_text(out)
             return
@@ -467,9 +467,7 @@ async def handle_line_message_event(
     # Non-text: image / file
     if mtype in ("image", "file"):
         parts: list[str] = []
-        ok_media = await _append_line_media_to_parts(
-            msg, line_client, user_id, session_id, parts
-        )
+        ok_media = await _append_line_media_to_parts(msg, line_client, user_id, session_id, parts)
         if not ok_media or not parts:
             await reply_text("无法处理该媒体。")
             return
@@ -716,11 +714,7 @@ async def dispatch_line_webhook(
                     try:
                         await line_client.reply_message(
                             reply_tok or "",
-                            [
-                                text_message(
-                                    "Mirai LINE 已就绪。发 /help 查看命令。"
-                                )
-                            ],
+                            [text_message("Mirai LINE 已就绪。发 /help 查看命令。")],
                         )
                     except Exception:
                         pass

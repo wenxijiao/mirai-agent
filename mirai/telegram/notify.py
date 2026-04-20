@@ -25,11 +25,7 @@ def parse_telegram_chat_id(session_id: str) -> int | None:
 
 
 def _events_to_plain_text(events: list[dict[str, Any]]) -> str:
-    return "".join(
-        str(e.get("content", ""))
-        for e in events
-        if e.get("type") == "text"
-    ).strip()
+    return "".join(str(e.get("content", "")) for e in events if e.get("type") == "text").strip()
 
 
 def _chunk_message(text: str) -> list[str]:

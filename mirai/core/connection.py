@@ -37,9 +37,9 @@ class ConnectionConfig(BaseModel):
 
 def http_to_ws(url: str) -> str:
     if url.startswith("https://"):
-        return "wss://" + url[len("https://"):]
+        return "wss://" + url[len("https://") :]
     if url.startswith("http://"):
-        return "ws://" + url[len("http://"):]
+        return "ws://" + url[len("http://") :]
     return url
 
 
@@ -73,9 +73,7 @@ def discover_lan_ips() -> list[str]:
         pass
 
     try:
-        for info in socket.getaddrinfo(
-            socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM
-        ):
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
             add_candidate(info[4][0])
     except socket.gaierror:
         pass

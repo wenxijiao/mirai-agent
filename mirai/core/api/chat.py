@@ -196,7 +196,9 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
 
                 tool_format_retries = 0
 
-                ephemeral_messages.append({"role": "assistant", "content": streamed_text_before_tools, "tool_calls": tcalls})
+                ephemeral_messages.append(
+                    {"role": "assistant", "content": streamed_text_before_tools, "tool_calls": tcalls}
+                )
 
                 prepared: list[dict] = []
                 for tc in tcalls:
@@ -231,7 +233,10 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     }
 
                     if func_name in TOOL_REGISTRY:
-                        if func_name in ("set_timer", "schedule_task") and args.get("session_id", "default") == "default":
+                        if (
+                            func_name in ("set_timer", "schedule_task")
+                            and args.get("session_id", "default") == "default"
+                        ):
                             args["session_id"] = session_id
                         entry["kind"] = "local"
                     else:
@@ -269,7 +274,11 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                         peer = ACTIVE_CONNECTIONS.get(target_edge)
                         if peer is None:
                             ephemeral_messages.append(
-                                {"role": "tool", "content": "Error: Device offline or tool not found.", "name": raw_call_name}
+                                {
+                                    "role": "tool",
+                                    "content": "Error: Device offline or tool not found.",
+                                    "name": raw_call_name,
+                                }
                             )
                             yield {
                                 "type": "tool_status",
@@ -360,11 +369,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             en = entry.get("target_edge")
                             if peer and en:
                                 oid, es = parse_edge_connection_key(en)
-                                tp = (
-                                    edge_tool_register_prefix(oid, es)
-                                    if oid
-                                    else edge_tool_key_prefix(es)
-                                )
+                                tp = edge_tool_register_prefix(oid, es) if oid else edge_tool_key_prefix(es)
                                 try:
                                     await _push_confirmation_policy_to_edge_peer(peer, en, tp)
                                 except Exception:
