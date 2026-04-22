@@ -35,12 +35,14 @@ async def _timer_fire(timer_id: str, delay: int, description: str, session_id: s
     prompt = (
         f"[Timer expired — scheduled action]\n"
         f"Planned task: {description}\n"
-        f"Now execute it: call tools (get_weather, web_search, set_timer, etc.) as needed, "
-        f"then answer the user in the same language. Do not only apologize—complete the task."
+        f"The wait is over; this is that follow-up turn. Complete the task now: reply to the user, "
+        f"or call tools such as get_weather, web_search, or read_file if the task needs fresh data. "
+        f"Do not schedule another delay (no new timer for something you can say or do immediately). "
+        f"Answer in the same language as the user."
     )
     collected: list[dict] = []
     try:
-        async for event in generate_chat_events(prompt, session_id):
+        async for event in generate_chat_events(prompt, session_id, timer_callback=True):
             collected.append(event)
     except Exception as exc:
         collected.append({"type": "error", "content": str(exc)})

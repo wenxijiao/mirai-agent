@@ -54,6 +54,14 @@ def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[
             out.extend(tools)
             i = j
             continue
+        if m.get("role") == "tool":
+            # Standalone tool rows only reach here when they are not paired with a preceding
+            # ``assistant``+``tool_calls`` in this slice (e.g. session history window cuts off
+            # the model turn).  Feeding them to Gemini produces ``function`` responses without a
+            # prior ``function_call`` → 400 INVALID_ARGUMENT.
+            dropped_blocks += 1
+            i += 1
+            continue
         out.append(m)
         i += 1
 
@@ -62,9 +70,9 @@ def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[
         dropped_blocks += 1
 
     if dropped_blocks:
-        _logger.warning(
+        _logger.debug(
             "Gemini: removed %s broken tool-turn fragment(s) from message history "
-            "(use /clear or a new session if errors persist).",
+            "(ephemeral/UI edge case; clear session if errors persist).",
             dropped_blocks,
         )
     return out

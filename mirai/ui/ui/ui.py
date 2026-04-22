@@ -10,7 +10,7 @@ from typing import Any
 
 import reflex as rx
 import requests
-from mirai.core.memories.memory import message_hidden_from_chat_ui
+from mirai.core.memories.tool_replay import message_hidden_from_chat_ui
 from mirai.logging_config import get_logger
 from mirai.ui.ui.constants import (
     _MONITOR_POLL_JS,
@@ -73,6 +73,49 @@ class ChatMessage(BaseModel):
     role: str
     content: str
     thought: str = ""
+    message_id: str = ""
+
+
+def _dedupe_consecutive_identical_user_rows(msgs: list[ChatMessage]) -> list[ChatMessage]:
+    """Collapse runs of consecutive user bubbles with the same text (storage/sync glitches).
+
+    Legitimate repeat prompts are usually separated by an assistant turn; back-to-back
+    duplicates are almost always accidental double-persistence.
+    """
+    out: list[ChatMessage] = []
+    for m in msgs:
+        if (
+            m.role == "user"
+            and out
+            and out[-1].role == "user"
+            and (m.content or "").strip() == (out[-1].content or "").strip()
+        ):
+            continue
+        out.append(m)
+    return out
+
+
+def _build_messages_from_api_rows(raw: list[dict]) -> list[ChatMessage]:
+    built = [
+        ChatMessage(
+            role=m["role"],
+            content=m["content"],
+            thought=str(m.get("thought") or ""),
+            message_id=str(m.get("id") or ""),
+        )
+        for m in raw
+        if m.get("role") in ("user", "assistant") and not message_hidden_from_chat_ui(m)
+    ]
+    seen: set[str] = set()
+    unique: list[ChatMessage] = []
+    for cm in built:
+        mid = (cm.message_id or "").strip()
+        if mid:
+            if mid in seen:
+                continue
+            seen.add(mid)
+        unique.append(cm)
+    return _dedupe_consecutive_identical_user_rows(unique)
 
 
 class EdgeToolEntry(BaseModel):
@@ -117,11 +160,6 @@ class State(rx.State):
     session_id: str = ""
     is_loading: bool = False
     error_message: str = ""
-    # Multi-tenant browser login (optional; env MIRAI_USER_ACCESS_TOKEN still overrides).
-    user_access_token: str = ""
-    login_email: str = ""
-    login_password: str = ""
-    login_error: str = ""
     upload_notice: str = ""
     streaming_content: str = ""
     streaming_thought: str = ""
@@ -143,7 +181,6 @@ class State(rx.State):
     tools_search: str = ""
 
     # ── monitor page (topology + traces) ──
-    monitor_local_tool_count: int = 0
     monitor_edges_data: list[MonitorEdgeEntry] = []
     monitor_traces: list[ToolTraceEntry] = []
     trace_session_filter: str = ""
@@ -170,16 +207,6 @@ class State(rx.State):
     edit_memory_max_recent: int = 10
     edit_memory_max_related: int = 5
     memory_context_saving: bool = False
-
-    # ── admin page (multi-tenant / health) ──
-    admin_health: dict = {}
-    admin_me: dict = {}
-    admin_audit: list[dict] = []
-    admin_shares_outgoing: list[dict] = []
-    admin_shares_incoming: list[dict] = []
-    admin_shares_error: str = ""
-    admin_me_error: str = ""
-    admin_audit_error: str = ""
 
     default_prompt: str = ""
     default_prompt_is_default: bool = True
@@ -358,41 +385,6 @@ class State(rx.State):
         return f"Last {r} in session · {rel} cross-session related"
 
     @rx.var
-    def admin_health_pretty(self) -> str:
-        try:
-            return json.dumps(self.admin_health, indent=2, ensure_ascii=False) if self.admin_health else "{}"
-        except Exception:
-            return "{}"
-
-    @rx.var
-    def admin_shares_out_pretty(self) -> str:
-        try:
-            return json.dumps(self.admin_shares_outgoing, indent=2, ensure_ascii=False)
-        except Exception:
-            return "[]"
-
-    @rx.var
-    def admin_shares_in_pretty(self) -> str:
-        try:
-            return json.dumps(self.admin_shares_incoming, indent=2, ensure_ascii=False)
-        except Exception:
-            return "[]"
-
-    @rx.var
-    def admin_me_pretty(self) -> str:
-        try:
-            return json.dumps(self.admin_me, indent=2, ensure_ascii=False) if self.admin_me else "{}"
-        except Exception:
-            return "{}"
-
-    @rx.var
-    def admin_audit_pretty(self) -> str:
-        try:
-            return json.dumps(self.admin_audit, indent=2, ensure_ascii=False)
-        except Exception:
-            return "[]"
-
-    @rx.var
     def model_openai_key_saved(self) -> bool:
         return bool(self.model_config.get("openai_api_key_saved"))
 
@@ -424,44 +416,10 @@ class State(rx.State):
 
     def _headers(self) -> dict:
         h: dict[str, str] = {"Content-Type": "application/json"}
-        token = (
-            os.getenv("MIRAI_USER_ACCESS_TOKEN")
-            or os.getenv("MIRAI_ACCESS_TOKEN")
-            or (self.user_access_token or "").strip()
-            or ""
-        ).strip()
+        token = (os.getenv("MIRAI_USER_ACCESS_TOKEN") or os.getenv("MIRAI_ACCESS_TOKEN") or "").strip()
         if token:
             h["Authorization"] = f"Bearer {token}"
         return h
-
-    def login_submit(self):
-        """POST /auth/login (multi-tenant server); stores access token in session state."""
-        self.login_error = ""
-        base = self._base_url()
-        try:
-            r = requests.post(
-                f"{base}/auth/login",
-                json={"email": self.login_email.strip(), "password": self.login_password},
-                timeout=20,
-            )
-            if r.status_code == 200:
-                data = r.json()
-                self.user_access_token = str(data.get("access_token") or "")
-                self.login_password = ""
-                return rx.redirect("/")
-            try:
-                body = r.json()
-            except Exception:
-                body = {}
-            self.login_error = _format_http_error_detail(body) if body else f"HTTP {r.status_code}"
-        except Exception as exc:
-            self.login_error = str(exc)
-        return None
-
-    def logout(self):
-        self.user_access_token = ""
-        self.login_password = ""
-        return rx.redirect("/login")
 
     def _fetch_sessions(self):
         try:
@@ -490,15 +448,7 @@ class State(rx.State):
             )
             if r.ok:
                 raw = r.json().get("messages", [])
-                self.messages = [
-                    ChatMessage(
-                        role=m["role"],
-                        content=m["content"],
-                        thought=str(m.get("thought") or ""),
-                    )
-                    for m in raw
-                    if m.get("role") in ("user", "assistant") and not message_hidden_from_chat_ui(m)
-                ]
+                self.messages = _build_messages_from_api_rows(raw)
         except Exception:
             self.messages = []
 
@@ -534,12 +484,16 @@ class State(rx.State):
 
     def initialize(self):
         self.current_page = "chat"
-        if self.session_id:
-            return rx.call_script(_TIMER_POLL_JS, callback=State.poll_timer_events)
-        self.backend_url = self._base_url()
+        if not self.backend_url:
+            self.backend_url = self._base_url()
         self._fetch_dark_mode()
         self._fetch_sessions()
-        if self.sessions:
+        # Do not short-circuit when ``session_id`` is already set (Reflex client persistence).
+        # The previous early return skipped ``start_timer_listener``, so ``/timer-events`` was never
+        # consumed and timer completions never reached the chat UI.
+        if self.session_id:
+            self._fetch_messages()
+        elif self.sessions:
             self.session_id = self.sessions[0].get("session_id", "")
             self._fetch_messages()
         else:
@@ -572,61 +526,6 @@ class State(rx.State):
         self._fetch_monitor_topology()
         self._fetch_monitor_traces()
         return rx.call_script(_MONITOR_POLL_JS, callback=State.poll_monitor_tick)
-
-    def init_admin(self):
-        self.current_page = "admin"
-        if not self.backend_url:
-            self.backend_url = self._base_url()
-        self._fetch_dark_mode()
-        self._fetch_admin()
-
-    def _fetch_admin(self):
-        self.admin_shares_error = ""
-        self.admin_me_error = ""
-        self.admin_audit_error = ""
-        try:
-            r = requests.get(self._api("/health"), headers=self._headers(), timeout=8)
-            self.admin_health = r.json() if r.ok else {"http_error": r.status_code, "body": r.text[:500]}
-        except Exception as exc:
-            self.admin_health = {"error": str(exc)}
-        try:
-            r = requests.get(self._api("/tenancy/me"), headers=self._headers(), timeout=8)
-            if r.ok:
-                self.admin_me = r.json()
-            else:
-                self.admin_me = {}
-                self.admin_me_error = f"GET /tenancy/me HTTP {r.status_code}: {r.text[:300]}"
-        except Exception as exc:
-            self.admin_me = {}
-            self.admin_me_error = str(exc)
-        try:
-            r = requests.get(self._api("/tenancy/audit"), headers=self._headers(), timeout=8)
-            if r.ok:
-                data = r.json()
-                self.admin_audit = list(data.get("entries") or [])
-            else:
-                self.admin_audit = []
-                self.admin_audit_error = f"GET /tenancy/audit HTTP {r.status_code}: {r.text[:300]}"
-        except Exception as exc:
-            self.admin_audit = []
-            self.admin_audit_error = str(exc)
-        try:
-            r = requests.get(self._api("/tenancy/edge-shares"), headers=self._headers(), timeout=8)
-            if r.ok:
-                data = r.json()
-                self.admin_shares_outgoing = list(data.get("outgoing") or [])
-                self.admin_shares_incoming = list(data.get("incoming") or [])
-            else:
-                self.admin_shares_error = f"Edge shares HTTP {r.status_code}: {r.text[:300]}"
-                self.admin_shares_outgoing = []
-                self.admin_shares_incoming = []
-        except Exception as exc:
-            self.admin_shares_error = str(exc)
-            self.admin_shares_outgoing = []
-            self.admin_shares_incoming = []
-
-    def refresh_admin(self):
-        self._fetch_admin()
 
     def poll_monitor_tick(self, _tick: str = ""):
         if self.current_page != "monitor":
@@ -993,7 +892,6 @@ class State(rx.State):
             if not r.ok:
                 return
             data = r.json()
-            self.monitor_local_tool_count = int(data.get("local_tool_count", 0))
             edges: list[MonitorEdgeEntry] = []
             for e in data.get("edges", []):
                 edges.append(
@@ -1005,7 +903,6 @@ class State(rx.State):
                 )
             self.monitor_edges_data = edges
         except Exception:
-            self.monitor_local_tool_count = 0
             self.monitor_edges_data = []
 
     def _fetch_monitor_traces(self):
@@ -1118,20 +1015,13 @@ class State(rx.State):
             self.is_loading = False
 
     async def _finalize_successful_chat_turn(self):
-        final = self.streaming_content.strip()
-        if final:
-            thought_saved = self.streaming_thought.strip() if self.think_enabled else ""
-            self.messages.append(
-                ChatMessage(
-                    role="assistant",
-                    content=final,
-                    thought=thought_saved,
-                )
-            )
         self.streaming_content = ""
         self.streaming_thought = ""
         self.tool_messages = []
         await asyncio.to_thread(self._fetch_sessions)
+        # Single source of truth: server memory already has user + assistant rows after the
+        # stream ends; reloading avoids duplicate user bubbles (optimistic local + DB rows).
+        await asyncio.to_thread(self._fetch_messages)
 
     async def _drive_chat_stream(self, chat_q: asyncio.Queue, *, resume: bool = False):
         global _chat_stream_queue, _chat_stream_paused
@@ -1582,13 +1472,14 @@ class State(rx.State):
                 assistant_text = f"⏰ [Timer: {description}]"
 
             display = f"⏰ {assistant_text}" if not assistant_text.startswith("⏰") else assistant_text
-            self.messages.append(
+            self.messages = [
+                *self.messages,
                 ChatMessage(
                     role="assistant",
                     content=display,
                     thought=thought_text if self.think_enabled else "",
-                )
-            )
+                ),
+            ]
 
         if self.current_page == "chat":
             return rx.call_script(_TIMER_POLL_JS, callback=State.poll_timer_events)
@@ -1686,7 +1577,6 @@ def sidebar() -> rx.Component:
             _nav_link("message-square", "Chat", "/", "chat"),
             _nav_link("wrench", "Tools", "/tools", "tools"),
             _nav_link("activity", "Monitor", "/monitor", "monitor"),
-            _nav_link("shield", "Admin", "/admin", "admin"),
             _nav_link("settings", "Settings", "/settings", "settings"),
             spacing="1",
             width="100%",
@@ -2473,12 +2363,6 @@ def _chat_input() -> rx.Component:
                             content=rx.cond(State.think_enabled, "Deep thinking on", "Enable deep thinking"),
                         ),
                         rx.spacer(),
-                        rx.text(
-                            "Shift+Enter for new line",
-                            size="1",
-                            color="var(--text-3)",
-                            display=["none", "none", "block"],
-                        ),
                         spacing="2",
                         align="center",
                         padding_top="4px",
@@ -2486,6 +2370,7 @@ def _chat_input() -> rx.Component:
                     max_width="768px",
                     margin_x="auto",
                     width="100%",
+                    custom_attrs={"data-mirai-chat-input": ""},
                 ),
                 padding_x="24px",
                 padding_y="12px",
@@ -3619,6 +3504,14 @@ def _section_header(icon_name: str, title: str, desc: str) -> rx.Component:
 
 def _tools_main() -> rx.Component:
     return rx.vstack(
+        rx.callout(
+            "Configure what the agent may call: enable or disable server and edge tools, and optional "
+            "confirmation before sensitive tools. This page is for control—not execution history (see Monitor).",
+            icon="wrench",
+            color_scheme="blue",
+            size="1",
+            width="100%",
+        ),
         rx.hstack(
             rx.icon("search", size=14, color="var(--text-3)", flex_shrink="0"),
             rx.el.input(
@@ -3640,7 +3533,7 @@ def _tools_main() -> rx.Component:
             spacing="2",
             padding_bottom="8px",
         ),
-        _section_header("server", "Server Tools", "Built-in agent capabilities"),
+        _section_header("server", "Server tools", "Built-in capabilities you can turn on or off for this core"),
         rx.cond(
             State.has_server_tools,
             rx.cond(
@@ -3662,7 +3555,7 @@ def _tools_main() -> rx.Component:
                 width="100%",
             ),
         ),
-        _section_header("wifi", "Connected Devices", "Edge devices and their registered tools"),
+        _section_header("wifi", "Edge devices", "Remote nodes and the tools they expose—same toggles as above, per device"),
         rx.cond(
             State.has_edge_devices,
             rx.cond(
@@ -3769,20 +3662,31 @@ def _trace_row(trace: ToolTraceEntry) -> rx.Component:
 
 def _monitor_main() -> rx.Component:
     return rx.vstack(
-        _section_header("network", "Topology", "Core and edge devices (auto-refresh ~4.5s)"),
+        rx.callout(
+            "This page is observability only: reachability and recent tool executions. "
+            "To enable/disable tools or confirmation flags, use Tools.",
+            icon="activity",
+            color_scheme="gray",
+            size="1",
+            width="100%",
+        ),
+        _section_header(
+            "network",
+            "Connection snapshot",
+            "Local agent core and edge nodes (auto-refresh ~5s). Online/offline and tool counts are informational—not the same as toggles on Tools.",
+        ),
         rx.vstack(
             rx.hstack(
                 rx.icon("server", size=16, color="var(--text-3)"),
-                rx.text("Mirai Core", size="2", weight="medium", color="var(--text-1)"),
+                rx.text("Mirai core (this server)", size="2", weight="medium", color="var(--text-1)"),
                 rx.badge("local", variant="surface", size="1"),
                 spacing="2",
                 align="center",
             ),
-            rx.hstack(
-                rx.text("Enabled server tools:", size="2", color="var(--text-3)"),
-                rx.text(State.monitor_local_tool_count, size="2", weight="medium", color="var(--text-1)"),
-                spacing="2",
-                align="center",
+            rx.text(
+                "Configure which built-in tools are allowed on the Tools page.",
+                size="2",
+                color="var(--text-3)",
             ),
             spacing="2",
             padding="14px",
@@ -3795,14 +3699,18 @@ def _monitor_main() -> rx.Component:
             State.has_monitor_edges,
             rx.vstack(rx.foreach(State.monitor_edges_data, _monitor_edge_row), spacing="2", width="100%"),
             rx.center(
-                rx.text("No edge devices in topology", size="2", color="var(--text-3)"),
+                rx.text("No edge nodes registered yet", size="2", color="var(--text-3)"),
                 padding="20px",
                 border="1px dashed var(--border)",
                 border_radius="10px",
                 width="100%",
             ),
         ),
-        _section_header("history", "Tool traces", "Arguments are truncated for display; export is full NDJSON."),
+        _section_header(
+            "history",
+            "Recent tool runs",
+            "Execution log (arguments shortened on screen; Export NDJSON is complete). Filter by session id when needed.",
+        ),
         rx.hstack(
             rx.el.input(
                 placeholder="Session id (optional)",
@@ -3975,250 +3883,9 @@ def _tools_content() -> rx.Component:
     )
 
 
-def _admin_content() -> rx.Component:
-    return rx.vstack(
-        rx.hstack(
-            rx.cond(
-                State.sidebar_visible == False,  # noqa: E712
-                rx.tooltip(
-                    rx.icon_button(
-                        rx.icon("panel-left", size=18),
-                        variant="ghost",
-                        size="2",
-                        cursor="pointer",
-                        on_click=State.toggle_sidebar,
-                        color="var(--text-2)",
-                    ),
-                    content="Show sidebar",
-                ),
-                rx.fragment(),
-            ),
-            rx.text("Admin", size="4", weight="medium", color="var(--text-1)", flex="1"),
-            rx.tooltip(
-                rx.icon_button(
-                    rx.icon("refresh-cw", size=14),
-                    variant="ghost",
-                    size="1",
-                    cursor="pointer",
-                    on_click=State.refresh_admin,
-                    color="var(--text-3)",
-                    _hover={"color": "var(--text-1)"},
-                ),
-                content="Refresh",
-            ),
-            width="100%",
-            align="center",
-            spacing="2",
-            padding_x="24px",
-            padding_y="10px",
-            min_height="48px",
-            border_bottom="1px solid var(--border)",
-        ),
-        rx.box(
-            rx.vstack(
-                rx.text(
-                    "Shows /health, /tenancy/me, /tenancy/audit, and /tenancy/edge-shares. "
-                    "For multi-tenant APIs, set MIRAI_USER_ACCESS_TOKEN or MIRAI_ACCESS_TOKEN when starting the UI.",
-                    size="2",
-                    color="var(--text-3)",
-                ),
-                rx.cond(
-                    State.admin_me_error != "",
-                    rx.callout(
-                        State.admin_me_error,
-                        icon="triangle-alert",
-                        color_scheme="amber",
-                        width="100%",
-                    ),
-                    rx.fragment(),
-                ),
-                rx.cond(
-                    State.admin_audit_error != "",
-                    rx.callout(
-                        State.admin_audit_error,
-                        icon="triangle-alert",
-                        color_scheme="amber",
-                        width="100%",
-                    ),
-                    rx.fragment(),
-                ),
-                rx.box(
-                    rx.text("Profile (/tenancy/me)", size="3", weight="medium", color="var(--text-1)"),
-                    rx.el.pre(
-                        State.admin_me_pretty,
-                        style={
-                            "font_family": "var(--font-mono)",
-                            "font_size": "12px",
-                            "white_space": "pre-wrap",
-                            "word_break": "break-word",
-                            "margin": "0",
-                            "padding": "12px",
-                            "background": "var(--bg-hover)",
-                            "border_radius": "8px",
-                            "border": "1px solid var(--border)",
-                            "max_height": "260px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    width="100%",
-                    spacing="2",
-                ),
-                rx.box(
-                    rx.text("Audit tail (/tenancy/audit)", size="3", weight="medium", color="var(--text-1)"),
-                    rx.el.pre(
-                        State.admin_audit_pretty,
-                        style={
-                            "font_family": "var(--font-mono)",
-                            "font_size": "12px",
-                            "white_space": "pre-wrap",
-                            "word_break": "break-word",
-                            "margin": "0",
-                            "padding": "12px",
-                            "background": "var(--bg-hover)",
-                            "border_radius": "8px",
-                            "border": "1px solid var(--border)",
-                            "max_height": "260px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    width="100%",
-                    spacing="2",
-                ),
-                rx.box(
-                    rx.text("Health (/health)", size="3", weight="medium", color="var(--text-1)"),
-                    rx.el.pre(
-                        State.admin_health_pretty,
-                        style={
-                            "font_family": "var(--font-mono)",
-                            "font_size": "12px",
-                            "white_space": "pre-wrap",
-                            "word_break": "break-word",
-                            "margin": "0",
-                            "padding": "12px",
-                            "background": "var(--bg-hover)",
-                            "border_radius": "8px",
-                            "border": "1px solid var(--border)",
-                            "max_height": "320px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    width="100%",
-                    spacing="2",
-                ),
-                rx.cond(
-                    State.admin_shares_error != "",
-                    rx.callout(
-                        State.admin_shares_error,
-                        icon="triangle-alert",
-                        color_scheme="amber",
-                        width="100%",
-                    ),
-                    rx.fragment(),
-                ),
-                rx.box(
-                    rx.text("Edge shares (outgoing)", size="3", weight="medium", color="var(--text-1)"),
-                    rx.el.pre(
-                        State.admin_shares_out_pretty,
-                        style={
-                            "font_family": "var(--font-mono)",
-                            "font_size": "12px",
-                            "white_space": "pre-wrap",
-                            "margin": "0",
-                            "padding": "12px",
-                            "background": "var(--bg-hover)",
-                            "border_radius": "8px",
-                            "border": "1px solid var(--border)",
-                            "max_height": "200px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    width="100%",
-                    spacing="2",
-                ),
-                rx.box(
-                    rx.text("Edge shares (incoming)", size="3", weight="medium", color="var(--text-1)"),
-                    rx.el.pre(
-                        State.admin_shares_in_pretty,
-                        style={
-                            "font_family": "var(--font-mono)",
-                            "font_size": "12px",
-                            "white_space": "pre-wrap",
-                            "margin": "0",
-                            "padding": "12px",
-                            "background": "var(--bg-hover)",
-                            "border_radius": "8px",
-                            "border": "1px solid var(--border)",
-                            "max_height": "200px",
-                            "overflow_y": "auto",
-                        },
-                    ),
-                    width="100%",
-                    spacing="2",
-                ),
-                spacing="5",
-                width="100%",
-                max_width="900px",
-                padding="24px",
-            ),
-            flex="1",
-            overflow_y="auto",
-            width="100%",
-        ),
-        spacing="0",
-        width="100%",
-        height="100vh",
-        background="var(--bg-page)",
-        min_width="0",
-        flex="1",
-    )
-
-
 # ────────────────────────────────────────────
 #  Pages
 # ────────────────────────────────────────────
-
-
-def login_page() -> rx.Component:
-    return rx.center(
-        rx.card(
-            rx.vstack(
-                rx.heading("Mirai · Sign in", size="6"),
-                rx.text(
-                    "Requires server in multi-tenant mode with /auth/login. "
-                    "Set MIRAI_USER_ACCESS_TOKEN in env to skip this page.",
-                    size="2",
-                    color="gray",
-                ),
-                rx.input(
-                    placeholder="Email",
-                    value=State.login_email,
-                    on_change=State.set_login_email,
-                    width="100%",
-                    type="email",
-                ),
-                rx.input(
-                    placeholder="Password",
-                    value=State.login_password,
-                    on_change=State.set_login_password,
-                    width="100%",
-                    type="password",
-                ),
-                rx.button("Sign in", on_click=State.login_submit, width="100%"),
-                rx.cond(
-                    State.login_error != "",
-                    rx.text(State.login_error, color="red", size="2"),
-                ),
-                rx.link("Back to chat", href="/"),
-                spacing="3",
-                width="100%",
-                max_width="420px",
-            ),
-            padding="24px",
-        ),
-        width="100%",
-        height="100vh",
-        background="var(--bg-page)",
-    )
 
 
 def chat_page() -> rx.Component:
@@ -4237,10 +3904,6 @@ def settings_page() -> rx.Component:
     return base_layout(_settings_content())
 
 
-def admin_page() -> rx.Component:
-    return base_layout(_admin_content())
-
-
 # ── app ──
 
 app = rx.App(
@@ -4250,9 +3913,7 @@ app = rx.App(
         "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap",
     ],
 )
-app.add_page(login_page, route="/login", title="Mirai · Login")
 app.add_page(chat_page, route="/", on_load=State.initialize, title="Mirai")
 app.add_page(tools_page, route="/tools", on_load=State.init_tools, title="Mirai · Tools")
 app.add_page(monitor_page, route="/monitor", on_load=State.init_monitor, title="Mirai · Monitor")
 app.add_page(settings_page, route="/settings", on_load=State.init_settings, title="Mirai · Settings")
-app.add_page(admin_page, route="/admin", on_load=State.init_admin, title="Mirai · Admin")

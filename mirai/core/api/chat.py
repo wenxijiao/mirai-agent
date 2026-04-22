@@ -72,6 +72,24 @@ def _canonical_local_tool_name(raw: str) -> str:
     return fn
 
 
+# When a *timer fires*, the planned action should run now — not schedule another delay.
+_DELAY_SCHEDULING_TOOL_NAMES = frozenset({"set_timer", "schedule_task"})
+
+
+def _exclude_delay_scheduling_tools(tools: list | None) -> list | None:
+    """Drop ``set_timer`` / ``schedule_task`` from schema lists (timer callback follow-up turns)."""
+    if not tools:
+        return tools
+    out: list = []
+    for t in tools:
+        fn = t.get("function") if isinstance(t, dict) else None
+        name = fn.get("name") if isinstance(fn, dict) else ""
+        if name in _DELAY_SCHEDULING_TOOL_NAMES:
+            continue
+        out.append(t)
+    return out or None
+
+
 def _tail_assistant_tool_span(messages: list[dict]) -> tuple[int, int] | None:
     """Return ``[start, end)`` indices for the last ``assistant``+``tool_calls`` and its ``tool`` replies.
 
@@ -100,7 +118,7 @@ def _persist_tool_ephemeral_tail(ephemeral_messages: list, session_id: str, bot)
     del ephemeral_messages[i:j]
 
 
-async def generate_chat_events(prompt: str, session_id: str, think: bool = False):
+async def generate_chat_events(prompt: str, session_id: str, think: bool = False, *, timer_callback: bool = False):
     owner_uid = get_session_scope().owner_user_from_session_id(session_id)
     owner_token = set_chat_owner_user_id(owner_uid)
     total_prompt_tokens = 0
@@ -135,6 +153,8 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     }
                     break
                 all_tools = get_all_tool_schemas(get_current_identity())
+                if timer_callback:
+                    all_tools = _exclude_delay_scheduling_tools(all_tools)
                 stream = active_bot.chat_stream(
                     prompt=current_prompt,
                     session_id=session_id,
@@ -525,7 +545,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             label = f"'{fn}'"
                         yield {"type": "tool_status", "status": "error", "content": f"Tool {label} failed."}
 
-                ephemeral_messages.append({"role": "tool", "content": r["result"], "name": tool_nm})
+                    ephemeral_messages.append({"role": "tool", "content": r["result"], "name": tool_nm})
 
             _persist_tool_ephemeral_tail(ephemeral_messages, session_id, active_bot)
             current_prompt = None

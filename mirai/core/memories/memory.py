@@ -27,6 +27,57 @@ from mirai.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _assistant_tool_call_count_from_stored_raw(raw: str) -> int | None:
+    """Return number of tool calls in a persisted assistant row, or ``None`` if not a tool-call turn."""
+    if not raw.startswith(MIRAI_V1_TOOL_CALLS):
+        return None
+    try:
+        data = json.loads(raw[len(MIRAI_V1_TOOL_CALLS) :])
+        tcalls = data.get("tool_calls")
+        if isinstance(tcalls, list) and len(tcalls) > 0:
+            return len(tcalls)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _trim_trailing_incomplete_tool_rows(rows: list[dict]) -> list[dict]:
+    """Drop suffix starting at an ``assistant``(+tool_calls) row that lacks enough following ``tool`` rows.
+
+    Sliding-window reads can end mid-turn; Gemini/OpenAI replay require complete spans.
+    """
+    if not rows:
+        return rows
+    out = list(rows)
+    i = 0
+    while i < len(out):
+        if out[i].get("role") != "assistant":
+            i += 1
+            continue
+        raw = out[i].get("content") or ""
+        n = _assistant_tool_call_count_from_stored_raw(raw)
+        if not n:
+            i += 1
+            continue
+        j = i + 1
+        got = 0
+        while j < len(out) and out[j].get("role") == "tool" and got < n:
+            got += 1
+            j += 1
+        if got < n:
+            return out[:i]
+        i = j
+    return out
+
+
+def _trim_leading_orphan_tool_rows(rows: list[dict]) -> list[dict]:
+    """Drop ``tool`` rows at the start of the window (matching model turn was truncated off)."""
+    out = list(rows)
+    while out and out[0].get("role") == "tool":
+        out.pop(0)
+    return out
+
+
 class Memory:
     _shared_db: dict[str, object] = {}
     _initialized_dirs: set[str] = set()
@@ -744,14 +795,31 @@ class Memory:
         where_clause = self._build_where_clause("session_id", self.session_id)
         total_messages = table.count_rows(where_clause)
         offset = max(total_messages - max_recent, 0)
+        limit = max_recent
 
-        results = (
-            table.search(query=None, ordering_field_name="timestamp_num")
-            .where(where_clause)
-            .offset(offset)
-            .limit(max_recent)
-            .to_list()
-        )
+        base = table.search(query=None, ordering_field_name="timestamp_num").where(where_clause)
+
+        def _fetch_window() -> list[dict]:
+            return base.offset(offset).limit(limit).to_list()
+
+        results = _fetch_window()
+        # Include older rows until the slice does not start with orphan tool results (model+tool_calls
+        # was cut off by offset).  Keeps the same newest tail: offset+limit == total_messages.
+        guard = 0
+        while (
+            results
+            and results[0].get("role") == "tool"
+            and offset > 0
+            and guard < 48
+        ):
+            step = min(64, offset)
+            offset -= step
+            limit += step
+            results = _fetch_window()
+            guard += 1
+
+        results = _trim_leading_orphan_tool_rows(results)
+        results = _trim_trailing_incomplete_tool_rows(results)
 
         for msg in results:
             raw = msg.get("content") or ""

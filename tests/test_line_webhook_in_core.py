@@ -5,9 +5,26 @@ import hashlib
 import hmac
 import json
 
+import pytest
+
 import mirai.core.api.routes as api
 from fastapi.testclient import TestClient
+from mirai.core.config.model import ModelConfig
 from mirai.line.client import LineMessagingClient
+
+
+@pytest.fixture(autouse=True)
+def _line_tests_stub_chat_model_config(monkeypatch):
+    """``lifespan`` calls ``ensure_chat_model_configured``; stub so tests do not depend on env / ~/.mirai.
+
+    CI may set ``MIRAI_CHAT_MODEL`` to an empty value or merge config in an order that still leaves
+    ``chat_model`` unset; patching the function used by ``routes.lifespan`` is reliable.
+    """
+
+    def _ensure(*, interactive: bool = False) -> ModelConfig:
+        return ModelConfig(chat_model="test-dummy-model")
+
+    monkeypatch.setattr("mirai.core.api.routes.ensure_chat_model_configured", _ensure)
 
 
 def _sign(body: bytes, secret: str) -> str:

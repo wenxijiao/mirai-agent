@@ -1,6 +1,6 @@
 # Mirai HTTP API (core server and Relay)
 
-HTTP integration guide for **any language**. Implementation lives in `mirai/core/api.py` (core) and `mirai/relay/app.py` (Relay gateway).
+HTTP integration guide for **any language**. Core implementation lives in the [`mirai/core/api/`](../mirai/core/api/) package. The Relay gateway ships in the separate **`mirai-enterprise`** package (not in this OSS repo); see [UPGRADING_TO_ENTERPRISE.md](UPGRADING_TO_ENTERPRISE.md).
 
 ## Basics
 
@@ -180,7 +180,7 @@ For most routes, send:
 Authorization: Bearer <access_token>
 ```
 
-Obtain `access_token` from `POST /v1/bootstrap` using a join code; see `BootstrapRequest` in `mirai/relay/app.py`.
+Obtain `access_token` from `POST /v1/bootstrap` using a join code; see the Relay / bootstrap types in **`mirai-enterprise`** (not shipped in this repository).
 
 ### Path mapping
 

@@ -434,6 +434,11 @@ def run_line_standalone() -> None:
 # ── ui ──
 
 
+def _reflex_ui_root() -> str:
+    """Directory of the Reflex app (``mirai/ui``, contains ``rxconfig.py``)."""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
+
+
 def run_ui():
     env = prepare_client_environment("ui")
 
@@ -453,8 +458,7 @@ def run_ui():
 
     _print_banner("Mirai UI", rows)
 
-    ui_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
-    subprocess.run([sys.executable, "-m", "reflex", "run"], cwd=ui_dir, env=env)
+    subprocess.run([sys.executable, "-m", "reflex", "run"], cwd=_reflex_ui_root(), env=env)
 
 
 # ── chat ──

@@ -20,36 +20,81 @@ SCROLL_SCRIPT = """
 
 TEXTAREA_SCRIPT = """
 (function(){
-    function resolveTa(){
-        var n=document.getElementById('chat-input');
-        if(!n)return null;
-        if(n.tagName&&n.tagName.toLowerCase()==='textarea')return n;
-        return n.querySelector?n.querySelector('textarea'):null;
+    var composing=new WeakMap();
+    var lastSendAt=0;
+    function inComposer(t){
+        if(!t||!t.closest)return false;
+        if(t.closest('#mirai_chat_drop')||t.closest('[data-mirai-chat-input]'))return true;
+        var w=document.getElementById('chat-input');
+        return !!(w&&w.contains(t));
     }
-    function setup(){
-        var el=resolveTa();
-        if(!el){setTimeout(setup,300);return}
-        var composing=false;
-        el.addEventListener('compositionstart',function(){composing=true});
-        el.addEventListener('compositionend',function(){composing=false});
-        el.addEventListener('keydown',function(e){
-            if(e.key==='Enter'&&!e.shiftKey&&!composing&&!e.isComposing){
-                e.preventDefault();
-                setTimeout(function(){
-                    var btn=document.getElementById('send-btn');
-                    if(btn&&!btn.disabled)btn.click();
-                },0);
-            }
-        });
-        function resize(){
-            el.style.height='auto';
-            el.style.height=Math.min(el.scrollHeight,160)+'px';
-        }
-        el.addEventListener('input',resize);
+    function imeActive(e,t){
+        if(e&&(e.isComposing===true))return true;
+        if(e&&e.keyCode===229)return true;
+        if(e&&e.which===229)return true;
+        try{
+            var n=e&&e.nativeEvent;
+            if(n&&n.isComposing)return true;
+            if(n&&n.keyCode===229)return true;
+        }catch(x){}
+        return t&&composing.get(t)===true;
     }
-    if(document.readyState==='loading')
-        document.addEventListener('DOMContentLoaded',setup);
-    else setup();
+    function clickSend(){
+        var btn=document.getElementById('send-btn');
+        if(btn&&!btn.disabled)btn.click();
+    }
+    function safeSend(){
+        var now=Date.now();
+        if(now-lastSendAt<120)return;
+        lastSendAt=now;
+        setTimeout(clickSend,0);
+    }
+    document.addEventListener('compositionstart',function(e){
+        var t=e.target;
+        if(t&&t.tagName&&t.tagName.toLowerCase()==='textarea'&&inComposer(t))
+            composing.set(t,true);
+    },true);
+    document.addEventListener('compositionend',function(e){
+        var t=e.target;
+        if(t&&t.tagName&&t.tagName.toLowerCase()==='textarea')
+            composing.set(t,false);
+    },true);
+    // Chrome (incl. Mac IME): ``beforeinput``/``insertLineBreak`` is the clean signal for
+    // "Enter would insert a newline"; use with Shift+Enter still ``insertLineBreak`` but shiftKey set.
+    function onBeforeInput(e){
+        if(e.inputType!=='insertLineBreak')return;
+        if(e.shiftKey)return;
+        var t=e.target;
+        if(!t||t.tagName.toLowerCase()!=='textarea')return;
+        if(!inComposer(t))return;
+        if(imeActive(e,t))return;
+        e.preventDefault();
+        safeSend();
+    }
+    function onDocKeyDown(e){
+        if(e.shiftKey)return;
+        var k=e.key||'';
+        var c=e.code||'';
+        if(k!=='Enter'&&c!=='Enter'&&c!=='NumpadEnter')return;
+        var t=e.target;
+        if(!t||!t.tagName||t.tagName.toLowerCase()!=='textarea')return;
+        if(!inComposer(t))return;
+        if(imeActive(e,t))return;
+        e.preventDefault();
+        safeSend();
+    }
+    function onDocInput(e){
+        var t=e.target;
+        if(!t||!t.tagName||t.tagName.toLowerCase()!=='textarea')return;
+        if(!inComposer(t))return;
+        t.style.height='auto';
+        t.style.height=Math.min(t.scrollHeight,160)+'px';
+    }
+    if(typeof document!=='undefined'&&'onbeforeinput'in document){
+        document.addEventListener('beforeinput',onBeforeInput,true);
+    }
+    document.addEventListener('keydown',onDocKeyDown,true);
+    document.addEventListener('input',onDocInput,true);
 })();
 """
 
