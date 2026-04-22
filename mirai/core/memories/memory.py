@@ -806,12 +806,7 @@ class Memory:
         # Include older rows until the slice does not start with orphan tool results (model+tool_calls
         # was cut off by offset).  Keeps the same newest tail: offset+limit == total_messages.
         guard = 0
-        while (
-            results
-            and results[0].get("role") == "tool"
-            and offset > 0
-            and guard < 48
-        ):
+        while results and results[0].get("role") == "tool" and offset > 0 and guard < 48:
             step = min(64, offset)
             offset -= step
             limit += step

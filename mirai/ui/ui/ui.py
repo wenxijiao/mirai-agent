@@ -3555,7 +3555,9 @@ def _tools_main() -> rx.Component:
                 width="100%",
             ),
         ),
-        _section_header("wifi", "Edge devices", "Remote nodes and the tools they expose—same toggles as above, per device"),
+        _section_header(
+            "wifi", "Edge devices", "Remote nodes and the tools they expose—same toggles as above, per device"
+        ),
         rx.cond(
             State.has_edge_devices,
             rx.cond(

@@ -11,9 +11,7 @@ from mirai.core.memories.memory import (
 
 
 def _tc_payload(n: int) -> str:
-    calls = [
-        {"id": str(i), "type": "function", "function": {"name": f"t{i}", "arguments": "{}"}} for i in range(n)
-    ]
+    calls = [{"id": str(i), "type": "function", "function": {"name": f"t{i}", "arguments": "{}"}} for i in range(n)]
     return MIRAI_V1_TOOL_CALLS + json.dumps({"content": "", "tool_calls": calls})
 
 
@@ -21,7 +19,11 @@ def test_trailing_incomplete_drops_suffix():
     rows = [
         {"role": "user", "content": "hi", "timestamp": "1"},
         {"role": "assistant", "content": _tc_payload(2), "timestamp": "2"},
-        {"role": "tool", "content": MIRAI_V1_TOOL_RESULT + json.dumps({"name": "t0", "content": "x"}), "timestamp": "3"},
+        {
+            "role": "tool",
+            "content": MIRAI_V1_TOOL_RESULT + json.dumps({"name": "t0", "content": "x"}),
+            "timestamp": "3",
+        },
     ]
     out = _trim_trailing_incomplete_tool_rows(rows)
     assert len(out) == 1 and out[0]["role"] == "user"

@@ -5,9 +5,8 @@ import hashlib
 import hmac
 import json
 
-import pytest
-
 import mirai.core.api.routes as api
+import pytest
 from fastapi.testclient import TestClient
 from mirai.core.config.model import ModelConfig
 from mirai.line.client import LineMessagingClient
