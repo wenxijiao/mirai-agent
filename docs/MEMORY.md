@@ -6,6 +6,10 @@ This document describes what Mirai persists and how it reaches the model.
 
 - Chat messages (per `session_id`) are stored under the user memory directory (see `migrate_legacy_memory_dir()`), in **LanceDB** tables: `chat_history` and `chat_sessions`.
 - `MiraiBot` keeps an in-memory LRU of at most **64** `Memory` instances; evicting one **does not delete** LanceDB rows. The next request for that session reloads from disk.
+- Structured memory is stored separately from raw chat rows:
+  - `session_summaries` keeps a rolling summary per session.
+  - `long_term_memories` stores durable facts, preferences, decisions, task state, and summaries.
+  - `tool_observations` stores compact tool-call outcomes so later turns can reuse what tools already found.
 
 To delete persisted memory without wiping the rest of Mirai config, run:
 
@@ -23,12 +27,29 @@ This removes the current memory directory (`~/.mirai/memory/`) plus any legacy o
 | Final assistant **text** replies (no tool call in that step) | Yes |
 | Assistant **tool_calls** + following **tool** results for each tool round | Yes (encoded rows; replayed in `get_context`) |
 | Ephemeral-only context for the **current** multi-tool loop | Only the parts above are written; the in-memory `ephemeral_messages` list itself is not stored as a blob |
+| High-signal preferences / facts / decisions | Yes, selectively extracted into `long_term_memories` |
+| Tool results | Yes, replayed in `chat_history` and summarized into `tool_observations` |
 
 ## Retrieval (`Memory.get_context`)
 
+`Memory.get_context` now delegates to a `ContextBuilder` instead of assembling one flat transcript directly.
+
 1. One **system** message: global or per-session prompt (`get_system_prompt` / `get_session_prompt`).
-2. Optional **cross-session** block (`memory_max_related_messages` > 0): substring or vector search; if the query embedding is **degenerate** (e.g. all zeros), search falls back to **substring** match to avoid meaningless ANN results.
-3. Recent in-session rows (up to `memory_max_recent_messages`), including replayed **assistant+tool_calls** and **tool** rows when present.
+2. Optional structured memory block: hybrid retrieval over `long_term_memories` and `tool_observations`.
+3. Optional current-session summary from `session_summaries`.
+4. Optional **cross-session** block (`memory_max_related_messages` > 0): substring or vector search over raw chat messages; if the query embedding is **degenerate** (e.g. all zeros), search falls back to **substring** match to avoid meaningless ANN results.
+5. Recent in-session rows (up to `memory_max_recent_messages`), including replayed **assistant+tool_calls** and **tool** rows when present.
+
+Structured retrieval ranks candidates with semantic score when embeddings are available, keyword overlap, recency, importance, and memory-type boosts. If embeddings are unavailable, keyword and recency signals keep retrieval deterministic.
+
+## Write policy
+
+Raw chat history remains append-only for UI, audit, and provider replay. Long-term memory is selective:
+
+- Explicit user preferences, project facts, and decisions are extracted by conservative rules.
+- Tool results are compacted into tool observations with tool name, arguments summary, result summary, success flag, and importance.
+- Low-signal turns such as acknowledgements are not promoted to long-term memory.
+- A future LLM-based extractor can be added behind the same writer boundary without changing the public `Memory` API.
 
 ## Chat request extras (system message)
 

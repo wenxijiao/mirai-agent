@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import json
 import threading
 import uuid
 from datetime import datetime, timezone
 
 import lancedb
 from mirai.core.config import load_model_config, migrate_legacy_memory_dir, save_model_config
+from mirai.core.memories import transcript as _transcript
 from mirai.core.memories.constants import (
     ACTIVE_SESSION_STATUS,
     DEFAULT_SESSION_TITLE,
     DELETED_SESSION_STATUS,
-    MIRAI_V1_TOOL_CALLS,
-    MIRAI_V1_TOOL_RESULT,
 )
 from mirai.core.memories.embedding_state import (
     get_embed_provider,
@@ -20,6 +18,16 @@ from mirai.core.memories.embedding_state import (
 from mirai.core.memories.embedding_state import (
     is_degenerate_vector as _is_degenerate_vector,
 )
+from mirai.core.memories.models import (
+    LONG_TERM_MEMORY_KINDS,
+    LONG_TERM_TABLE,
+    SESSION_SUMMARY_TABLE,
+    TOOL_OBSERVATION_TABLE,
+    decode_json_list,
+    encode_json,
+)
+from mirai.core.memories.sessions import derive_session_title, normalize_session_status, normalize_session_title
+from mirai.core.memories.storage import add_row, query_rows, replace_row
 from mirai.core.memories.tool_replay import persist_openai_messages as _tool_replay_persist
 from mirai.core.prompts.store import get_effective_system_prompt
 from mirai.logging_config import get_logger
@@ -28,54 +36,15 @@ logger = get_logger(__name__)
 
 
 def _assistant_tool_call_count_from_stored_raw(raw: str) -> int | None:
-    """Return number of tool calls in a persisted assistant row, or ``None`` if not a tool-call turn."""
-    if not raw.startswith(MIRAI_V1_TOOL_CALLS):
-        return None
-    try:
-        data = json.loads(raw[len(MIRAI_V1_TOOL_CALLS) :])
-        tcalls = data.get("tool_calls")
-        if isinstance(tcalls, list) and len(tcalls) > 0:
-            return len(tcalls)
-    except (json.JSONDecodeError, TypeError):
-        pass
-    return None
+    return _transcript.assistant_tool_call_count_from_stored_raw(raw)
 
 
 def _trim_trailing_incomplete_tool_rows(rows: list[dict]) -> list[dict]:
-    """Drop suffix starting at an ``assistant``(+tool_calls) row that lacks enough following ``tool`` rows.
-
-    Sliding-window reads can end mid-turn; Gemini/OpenAI replay require complete spans.
-    """
-    if not rows:
-        return rows
-    out = list(rows)
-    i = 0
-    while i < len(out):
-        if out[i].get("role") != "assistant":
-            i += 1
-            continue
-        raw = out[i].get("content") or ""
-        n = _assistant_tool_call_count_from_stored_raw(raw)
-        if not n:
-            i += 1
-            continue
-        j = i + 1
-        got = 0
-        while j < len(out) and out[j].get("role") == "tool" and got < n:
-            got += 1
-            j += 1
-        if got < n:
-            return out[:i]
-        i = j
-    return out
+    return _transcript.trim_trailing_incomplete_tool_rows(rows)
 
 
 def _trim_leading_orphan_tool_rows(rows: list[dict]) -> list[dict]:
-    """Drop ``tool`` rows at the start of the window (matching model turn was truncated off)."""
-    out = list(rows)
-    while out and out[0].get("role") == "tool":
-        out.pop(0)
-    return out
+    return _transcript.trim_leading_orphan_tool_rows(rows)
 
 
 class Memory:
@@ -99,6 +68,9 @@ class Memory:
 
         self.table_name = "chat_history"
         self.session_table_name = "chat_sessions"
+        self.long_term_table_name = LONG_TERM_TABLE
+        self.tool_observation_table_name = TOOL_OBSERVATION_TABLE
+        self.session_summary_table_name = SESSION_SUMMARY_TABLE
 
         with Memory._init_lock:
             if self.db_dir not in Memory._shared_db:
@@ -425,22 +397,13 @@ class Memory:
         return matches[:limit]
 
     def _normalize_session_status(self, status: str):
-        normalized = str(status or ACTIVE_SESSION_STATUS).strip().lower()
-        if normalized not in {ACTIVE_SESSION_STATUS, DELETED_SESSION_STATUS}:
-            raise ValueError("Session status must be one of: active, deleted.")
-        return normalized
+        return normalize_session_status(status)
 
     def _normalize_session_title(self, title: str | None):
-        if title is None:
-            return DEFAULT_SESSION_TITLE
-        normalized = " ".join(title.strip().split())
-        return normalized[:80] if normalized else DEFAULT_SESSION_TITLE
+        return normalize_session_title(title)
 
     def _derive_session_title(self, content: str):
-        normalized = " ".join(content.strip().split())
-        if not normalized:
-            return DEFAULT_SESSION_TITLE
-        return normalized[:60]
+        return derive_session_title(content)
 
     def _put_session_row(self, row):
         if self._session_table_exists():
@@ -757,6 +720,247 @@ class Memory:
             self._embedding_available = False
             return [0.0] * self._fallback_vector_size
 
+    def _search_structured_table(
+        self,
+        table_name: str,
+        query: str,
+        *,
+        limit: int = 8,
+        content_field: str = "content",
+    ) -> list[dict]:
+        if not self._has_table(table_name):
+            return []
+        normalized_query = (query or "").strip()
+        if not normalized_query:
+            return []
+
+        query_vector = self._get_embedding(normalized_query)
+        rows: list[dict]
+        if self.embed_model and self._embedding_available and not _is_degenerate_vector(query_vector):
+            try:
+                rows = self.db.open_table(table_name).search(query_vector).limit(limit).to_list()
+            except Exception as exc:
+                logger.debug("Structured vector search failed for %s: %s", table_name, exc)
+                rows = []
+        else:
+            rows = []
+
+        if rows:
+            return rows
+
+        lowered = normalized_query.lower()
+        all_rows = query_rows(
+            self,
+            table_name,
+            ordering_field_name="updated_at_num" if table_name != self.tool_observation_table_name else "timestamp_num",
+        )
+        from mirai.core.memories.retrieval import keyword_score
+
+        matches = [
+            row
+            for row in all_rows
+            if lowered in str(row.get(content_field, "")).lower()
+            or keyword_score(normalized_query, str(row.get(content_field, ""))) > 0
+        ]
+        matches.sort(
+            key=lambda row: int(
+                row.get("updated_at_num") or row.get("timestamp_num") or row.get("created_at_num") or 0
+            ),
+            reverse=True,
+        )
+        return matches[:limit]
+
+    def get_session_summary(self, session_id: str | None = None):
+        sid = (session_id or self.session_id).strip() or self.session_id
+        rows = query_rows(
+            self,
+            self.session_summary_table_name,
+            where_clause=self._build_where_clause("session_id", sid),
+            limit=1,
+        )
+        return rows[0] if rows else None
+
+    def update_session_summary(
+        self,
+        summary: str,
+        session_id: str | None = None,
+        *,
+        covered_until_num: int | None = None,
+    ):
+        normalized = " ".join(str(summary or "").split())
+        if not normalized:
+            raise ValueError("Session summary cannot be empty.")
+        sid = (session_id or self.session_id).strip() or self.session_id
+        now = self._format_timestamp()
+        now_num = self._current_timestamp_num()
+        existing = self.get_session_summary(sid) or {}
+        row = {
+            "session_id": sid,
+            "summary": normalized,
+            "vector": self._get_embedding(normalized),
+            "covered_until_num": int(covered_until_num if covered_until_num is not None else now_num),
+            "created_at": existing.get("created_at") or now,
+            "created_at_num": int(existing.get("created_at_num") or now_num),
+            "updated_at": now,
+            "updated_at_num": now_num,
+        }
+        replace_row(self, self.session_summary_table_name, "session_id", sid, row)
+        return row
+
+    def create_long_term_memory(
+        self,
+        *,
+        kind: str,
+        content: str,
+        session_id: str | None = None,
+        source_message_ids: list[str] | None = None,
+        confidence: float = 0.5,
+        importance: float = 0.5,
+    ):
+        normalized_kind = str(kind or "fact").strip().lower()
+        if normalized_kind not in LONG_TERM_MEMORY_KINDS:
+            raise ValueError(f"Memory kind must be one of: {', '.join(sorted(LONG_TERM_MEMORY_KINDS))}.")
+        normalized_content = " ".join(str(content or "").split())
+        if not normalized_content:
+            raise ValueError("Long-term memory content cannot be empty.")
+        sid = (session_id or self.session_id).strip() or self.session_id
+        now = self._format_timestamp()
+        now_num = self._current_timestamp_num()
+        existing = self._find_long_term_duplicate(normalized_kind, normalized_content, sid)
+        row_id = existing.get("id") if existing else str(uuid.uuid4())
+        row = {
+            "id": row_id,
+            "vector": self._get_embedding(normalized_content),
+            "kind": normalized_kind,
+            "content": normalized_content,
+            "source_message_ids": encode_json([x for x in (source_message_ids or []) if x]),
+            "session_id": sid,
+            "confidence": float(max(0.0, min(1.0, confidence))),
+            "importance": float(max(0.0, min(1.0, importance))),
+            "created_at": existing.get("created_at") if existing else now,
+            "created_at_num": int(existing.get("created_at_num") or now_num) if existing else now_num,
+            "updated_at": now,
+            "updated_at_num": now_num,
+            "last_used_at": str(existing.get("last_used_at") or "") if existing else "",
+            "last_used_at_num": int(existing.get("last_used_at_num") or 0) if existing else 0,
+        }
+        if existing:
+            replace_row(self, self.long_term_table_name, "id", row_id, row)
+        else:
+            add_row(self, self.long_term_table_name, row)
+        return self._serialize_long_term_memory(row)
+
+    def _find_long_term_duplicate(self, kind: str, content: str, session_id: str):
+        if not self._has_table(self.long_term_table_name):
+            return None
+        normalized = " ".join(content.lower().split())
+        rows = query_rows(
+            self,
+            self.long_term_table_name,
+            where_clause=self._build_where_clause("kind", kind),
+        )
+        for row in rows:
+            if str(row.get("session_id") or "") != session_id:
+                continue
+            if " ".join(str(row.get("content") or "").lower().split()) == normalized:
+                return row
+        return None
+
+    def list_long_term_memories(self, kind: str | None = None, session_id: str | None = None, limit: int = 50):
+        where_clause = self._build_where_clause("kind", kind.strip().lower()) if kind else None
+        rows = query_rows(
+            self,
+            self.long_term_table_name,
+            ordering_field_name="updated_at_num",
+            where_clause=where_clause,
+            limit=limit,
+        )
+        if session_id is not None:
+            rows = [row for row in rows if str(row.get("session_id") or "") == session_id]
+        rows.sort(key=lambda row: int(row.get("updated_at_num") or 0), reverse=True)
+        return [self._serialize_long_term_memory(row) for row in rows[:limit]]
+
+    def _serialize_long_term_memory(self, row):
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "content": row["content"],
+            "source_message_ids": decode_json_list(row.get("source_message_ids")),
+            "session_id": row["session_id"],
+            "confidence": float(row.get("confidence") or 0.0),
+            "importance": float(row.get("importance") or 0.0),
+            "created_at": row["created_at"],
+            "created_at_num": int(row["created_at_num"]),
+            "updated_at": row["updated_at"],
+            "updated_at_num": int(row["updated_at_num"]),
+            "last_used_at": str(row.get("last_used_at") or ""),
+            "last_used_at_num": int(row.get("last_used_at_num") or 0),
+        }
+
+    def create_tool_observation(
+        self,
+        *,
+        tool_name: str,
+        args_summary: str = "",
+        result_summary: str,
+        success: bool = True,
+        session_id: str | None = None,
+        call_id: str = "",
+        importance: float = 0.5,
+    ):
+        normalized_result = " ".join(str(result_summary or "").split())
+        if not normalized_result:
+            return None
+        sid = (session_id or self.session_id).strip() or self.session_id
+        now = self._format_timestamp()
+        now_num = self._current_timestamp_num()
+        name = (tool_name or "tool").strip() or "tool"
+        args = " ".join(str(args_summary or "").split())
+        content = f"{name}({args}) -> {normalized_result}" if args else f"{name} -> {normalized_result}"
+        row = {
+            "id": str(uuid.uuid4()),
+            "vector": self._get_embedding(content),
+            "tool_name": name,
+            "args_summary": args,
+            "result_summary": normalized_result,
+            "content": content,
+            "success": bool(success),
+            "session_id": sid,
+            "call_id": str(call_id or ""),
+            "importance": float(max(0.0, min(1.0, importance))),
+            "timestamp": now,
+            "timestamp_num": now_num,
+        }
+        add_row(self, self.tool_observation_table_name, row)
+        return self._serialize_tool_observation(row)
+
+    def list_tool_observations(self, session_id: str | None = None, limit: int = 50):
+        rows = query_rows(
+            self,
+            self.tool_observation_table_name,
+            ordering_field_name="timestamp_num",
+            limit=limit,
+        )
+        if session_id is not None:
+            rows = [row for row in rows if str(row.get("session_id") or "") == session_id]
+        rows.sort(key=lambda row: int(row.get("timestamp_num") or 0), reverse=True)
+        return [self._serialize_tool_observation(row) for row in rows[:limit]]
+
+    def _serialize_tool_observation(self, row):
+        return {
+            "id": row["id"],
+            "tool_name": row["tool_name"],
+            "args_summary": row.get("args_summary") or "",
+            "result_summary": row["result_summary"],
+            "content": row.get("content") or row["result_summary"],
+            "success": bool(row.get("success", True)),
+            "session_id": row["session_id"],
+            "call_id": row.get("call_id") or "",
+            "importance": float(row.get("importance") or 0.0),
+            "timestamp": row["timestamp"],
+            "timestamp_num": int(row["timestamp_num"]),
+        }
+
     def add_message(self, role: str, content: str, thought: str | None = None):
         timestamp = self._format_timestamp()
         timestamp_num = self._current_timestamp_num()
@@ -772,80 +976,17 @@ class Memory:
     def persist_openai_messages(self, messages: list[dict]) -> None:
         """Persist assistant+tool_calls and tool rows so ``get_context`` can replay them."""
         _tool_replay_persist(self, messages)
+        try:
+            from mirai.core.memories.writer import MemoryWriter
+
+            MemoryWriter(self).observe_tool_turns(messages)
+        except Exception as exc:
+            logger.debug("Structured tool observation write skipped: %s", exc)
 
     def get_context(self, query: str = None, max_cross_session: int | None = None):
-        cfg = load_model_config()
-        max_recent = max(1, min(500, int(cfg.memory_max_recent_messages)))
-        if max_cross_session is None:
-            max_cross = max(0, min(100, int(cfg.memory_max_related_messages)))
-        else:
-            max_cross = max(0, min(100, int(max_cross_session)))
+        from mirai.core.memories.context import ContextBuilder
 
-        formatted_messages = [self.get_system_message()]
-
-        if query and max_cross > 0:
-            related = self.build_related_memory_message(query, exclude_session_id=self.session_id, limit=max_cross)
-            if related:
-                formatted_messages.append(related)
-
-        if not self._table_exists():
-            return formatted_messages
-
-        table = self._open_table()
-        where_clause = self._build_where_clause("session_id", self.session_id)
-        total_messages = table.count_rows(where_clause)
-        offset = max(total_messages - max_recent, 0)
-        limit = max_recent
-
-        base = table.search(query=None, ordering_field_name="timestamp_num").where(where_clause)
-
-        def _fetch_window() -> list[dict]:
-            return base.offset(offset).limit(limit).to_list()
-
-        results = _fetch_window()
-        # Include older rows until the slice does not start with orphan tool results (model+tool_calls
-        # was cut off by offset).  Keeps the same newest tail: offset+limit == total_messages.
-        guard = 0
-        while results and results[0].get("role") == "tool" and offset > 0 and guard < 48:
-            step = min(64, offset)
-            offset -= step
-            limit += step
-            results = _fetch_window()
-            guard += 1
-
-        results = _trim_leading_orphan_tool_rows(results)
-        results = _trim_trailing_incomplete_tool_rows(results)
-
-        for msg in results:
-            raw = msg.get("content") or ""
-            if msg["role"] == "assistant":
-                if raw.startswith(MIRAI_V1_TOOL_CALLS):
-                    try:
-                        data = json.loads(raw[len(MIRAI_V1_TOOL_CALLS) :])
-                        tcalls = data.get("tool_calls")
-                        if isinstance(tcalls, list) and tcalls:
-                            text_content = data.get("content", "")
-                            formatted_messages.append(
-                                {"role": "assistant", "content": text_content, "tool_calls": tcalls}
-                            )
-                            continue
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                formatted_messages.append({"role": "assistant", "content": raw})
-            elif msg["role"] == "user":
-                formatted_messages.append({"role": "user", "content": f"[{msg['timestamp']}] {raw}"})
-            elif msg["role"] == "tool":
-                if raw.startswith(MIRAI_V1_TOOL_RESULT):
-                    try:
-                        data = json.loads(raw[len(MIRAI_V1_TOOL_RESULT) :])
-                        name = data.get("name") or "tool"
-                        body = data.get("content", "")
-                        formatted_messages.append({"role": "tool", "name": name, "content": str(body)})
-                    except (json.JSONDecodeError, TypeError):
-                        formatted_messages.append({"role": "tool", "name": "tool", "content": raw})
-                else:
-                    formatted_messages.append({"role": "tool", "name": "tool", "content": raw})
-        return formatted_messages
+        return ContextBuilder(self).build(query=query, max_cross_session=max_cross_session)
 
     def get_recent_messages(self):
         context = self.get_context()
@@ -954,7 +1095,14 @@ class Memory:
             get_memory_factory().invalidate_size_cache(owner)
         except Exception:
             pass
-        return self._serialize_message(row)
+        serialized = self._serialize_message(row)
+        try:
+            from mirai.core.memories.writer import MemoryWriter
+
+            MemoryWriter(self).observe_message(serialized)
+        except Exception as exc:
+            logger.debug("Structured memory write skipped: %s", exc)
+        return serialized
 
     def update_message(self, message_id: str, content: str, role: str | None = None):
         existing = self.get_message(message_id)
@@ -982,6 +1130,20 @@ class Memory:
         return updated
 
     def search_messages(
+        self,
+        query: str,
+        session_id: str | None = None,
+        limit: int = 5,
+        include_deleted_sessions: bool = True,
+    ):
+        return self._legacy_search_messages(
+            query=query,
+            session_id=session_id,
+            limit=limit,
+            include_deleted_sessions=include_deleted_sessions,
+        )
+
+    def _legacy_search_messages(
         self,
         query: str,
         session_id: str | None = None,
