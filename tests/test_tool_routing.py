@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from mirai.core.config import ModelConfig
 from mirai.core.plugins import LOCAL_IDENTITY
 from mirai.core.tool import TOOL_REGISTRY

@@ -41,7 +41,9 @@ def test_tool_routing_cli_updates_config(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
     monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
     monkeypatch.setattr(cli, "CONFIG_PATH", p)
-    monkeypatch.setattr(sys, "argv", ["mirai", "--tool-routing", "--edge-tools-limit", "7", "--disable-edge-tool-routing"])
+    monkeypatch.setattr(
+        sys, "argv", ["mirai", "--tool-routing", "--edge-tools-limit", "7", "--disable-edge-tool-routing"]
+    )
     monkeypatch.setattr(cli, "configure_logging", lambda: None)
 
     cli.main()

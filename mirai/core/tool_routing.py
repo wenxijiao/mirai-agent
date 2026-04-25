@@ -66,9 +66,7 @@ class ToolCatalogEntry:
                 )
                 if part
             )
-        return " ".join(
-            part for part in (self.name, self.namespace, self.description, self.parameters_text) if part
-        )
+        return " ".join(part for part in (self.name, self.namespace, self.description, self.parameters_text) if part)
 
     @property
     def device_text(self) -> str:

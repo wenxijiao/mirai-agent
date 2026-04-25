@@ -24,8 +24,8 @@ from mirai.core.config import (
     run_model_setup,
     save_connection_code,
     save_line_channel_access_token,
-    save_model_config,
     save_line_channel_secret,
+    save_model_config,
     save_telegram_bot_token,
 )
 from mirai.core.connection import (
@@ -911,13 +911,23 @@ def main():
     if not args.tool_routing and (
         args.edge_tools_limit is not None or args.enable_edge_tool_routing or args.disable_edge_tool_routing
     ):
-        raise SystemExit("  Use --edge-tools-limit/--enable-edge-tool-routing/--disable-edge-tool-routing with --tool-routing.")
+        raise SystemExit(
+            "  Use --edge-tools-limit/--enable-edge-tool-routing/--disable-edge-tool-routing with --tool-routing."
+        )
 
     if (args.telegram or args.line) and (
-        args.ui or args.chat or args.edge or args.demo or args.setup or args.cleanup or args.cleanup_memory
+        args.ui
+        or args.chat
+        or args.edge
+        or args.demo
+        or args.setup
+        or args.cleanup
+        or args.cleanup_memory
         or args.tool_routing
     ):
-        raise SystemExit("  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup/--tool-routing.")
+        raise SystemExit(
+            "  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup/--tool-routing."
+        )
 
     try:
         if args.server and args.telegram:
