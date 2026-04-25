@@ -1,5 +1,6 @@
 """CLI environment selection tests without launching subprocesses."""
 
+import json
 import os
 import sys
 
@@ -33,3 +34,21 @@ def test_main_dispatches_cleanup_memory(monkeypatch):
     cli.main()
 
     assert called["memory"] is True
+
+
+def test_tool_routing_cli_updates_config(monkeypatch, tmp_path, capsys):
+    p = tmp_path / "config.json"
+    monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
+    monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
+    monkeypatch.setattr(cli, "CONFIG_PATH", p)
+    monkeypatch.setattr(sys, "argv", ["mirai", "--tool-routing", "--edge-tools-limit", "7", "--disable-edge-tool-routing"])
+    monkeypatch.setattr(cli, "configure_logging", lambda: None)
+
+    cli.main()
+
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["edge_tools_retrieval_limit"] == 7
+    assert saved["edge_tools_enable_dynamic_routing"] is False
+    out = capsys.readouterr().out
+    assert "Edge dynamic routing: disabled" in out
+    assert "Edge tools per turn:  7" in out

@@ -12,6 +12,7 @@ from mirai.core.api.state import (
     ACTIVE_CONNECTIONS,
     ALWAYS_ALLOWED_TOOLS,
     CONFIRMATION_TOOLS,
+    DISABLED_TOOLS,
     EDGE_TOOLS_REGISTRY,
     LOCAL_TOOL_TIMEOUT_DEFAULT,
     MAX_TOOL_CALL_FORMAT_RETRIES,
@@ -37,6 +38,7 @@ from mirai.core.plugins import (
 )
 from mirai.core.tool import TOOL_REGISTRY, execute_registered_tool
 from mirai.core.tool_call_normalize import normalize_tool_calls, tool_call_format_retry_user_content
+from mirai.core.tool_routing import record_tool_routing_usage, select_tool_schemas
 from mirai.core.tool_trace import record_tool_trace
 from mirai.logging_config import get_logger
 
@@ -140,7 +142,9 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
 
             active_bot = await get_bot_pool().get_bot_for_session_owner(owner_uid)
             current_prompt = prompt
+            routing_query = prompt
             ephemeral_messages = []
+            active_edge_tool_names: set[str] = set()
             loop_count = 0
             tool_format_retries = 0
 
@@ -152,7 +156,20 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                         "content": "System: Maximum tool execution iterations reached. Stopping to prevent infinite loops.",
                     }
                     break
-                all_tools = get_all_tool_schemas(get_current_identity())
+                ident = get_current_identity()
+                try:
+                    routing_decision = select_tool_schemas(
+                        identity=ident,
+                        query=routing_query,
+                        session_id=session_id,
+                        disabled_tools=DISABLED_TOOLS,
+                        edge_registry=EDGE_TOOLS_REGISTRY,
+                        force_edge_tool_names=active_edge_tool_names,
+                    )
+                    all_tools = routing_decision.tools
+                except Exception as exc:
+                    _chat_log.warning("Dynamic tool routing failed; falling back to all tool schemas: %s", exc)
+                    all_tools = get_all_tool_schemas(ident)
                 if timer_callback:
                     all_tools = _exclude_delay_scheduling_tools(all_tools)
                 stream = active_bot.chat_stream(
@@ -311,6 +328,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                         entry["target_edge"] = target_edge
                         entry["original_tool_name"] = original_tool_name
                         entry["peer"] = peer
+                        active_edge_tool_names.add(func_name)
 
                     prepared.append(entry)
 
@@ -559,6 +577,12 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
             }
         finally:
             try:
+                record_tool_routing_usage(
+                    session_id=session_id,
+                    prompt_tokens=total_prompt_tokens,
+                    completion_tokens=total_completion_tokens,
+                    model=usage_model or (active_bot.model_name if active_bot is not None else ""),
+                )
                 if active_bot is not None:
                     ident = get_current_identity()
                     if ident.user_id != SINGLE_USER_ID and ident.user_id == owner_uid:

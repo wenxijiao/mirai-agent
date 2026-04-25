@@ -94,3 +94,40 @@ def test_model_config_public_dict_includes_key_flags(monkeypatch, tmp_path: Path
     assert "openai_api_key_effective" in d
     assert "gemini_api_key_effective" in d
     assert "openai_base_url" in d
+    assert d["edge_tools_enable_dynamic_routing"] is True
+    assert d["edge_tools_retrieval_limit"] == 20
+
+
+def test_put_config_model_updates_edge_tool_routing_settings(monkeypatch, tmp_path: Path) -> None:
+    p = _patch_config_path(monkeypatch, tmp_path)
+    p.write_text(
+        json.dumps(
+            {
+                "chat_provider": "ollama",
+                "chat_model": "m",
+                "embedding_provider": "ollama",
+                "embedding_model": "m",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    import mirai.core.api.state as api_state
+
+    monkeypatch.setattr(api_state, "bot", None)
+    monkeypatch.setattr("mirai.core.api.routes.ensure_provider_available", lambda provider: None)
+
+    async def _run():
+        return await update_model_config_endpoint(
+            ModelConfigUpdateRequest(
+                edge_tools_enable_dynamic_routing=False,
+                edge_tools_retrieval_limit=7,
+            )
+        )
+
+    response = asyncio.run(_run())
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert response["edge_tools_enable_dynamic_routing"] is False
+    assert response["edge_tools_retrieval_limit"] == 7
+    assert saved["edge_tools_enable_dynamic_routing"] is False
+    assert saved["edge_tools_retrieval_limit"] == 7

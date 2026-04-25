@@ -38,6 +38,24 @@
 | `MIRAI_CHAT_APPEND_CURRENT_TIME` | Set to `1`/`true` to append the current time to the system prompt |
 | `MIRAI_CHAT_APPEND_TOOL_INSTRUCTION` | Set to `1`/`true` to append tool-use instructions to the system prompt |
 
+### Tool Routing
+
+| Variable | Description |
+|---|---|
+| `MIRAI_EDGE_TOOLS_DYNAMIC_ROUTING` | Set to `1`/`true` to rank and cap Edge tools per chat turn (default `true`) |
+| `MIRAI_EDGE_TOOLS_RETRIEVAL_LIMIT` | Number of Edge tool schemas exposed per chat turn, `0`-`200` (default `20`) |
+
+Core Mirai tools are always loaded when enabled. Edge tools are registered in full, but when dynamic routing is enabled Mirai embeds the current request and Edge tool retrieval documents, then exposes only the most relevant Edge tools to the model. If embeddings are unavailable, Mirai falls back to deterministic lexical matching.
+
+You can also update the saved config from the terminal:
+
+```bash
+mirai --tool-routing
+mirai --tool-routing --edge-tools-limit 30
+mirai --tool-routing --disable-edge-tool-routing
+mirai --tool-routing --enable-edge-tool-routing --edge-tools-limit 20
+```
+
 ### Logging
 
 | Variable | Description |

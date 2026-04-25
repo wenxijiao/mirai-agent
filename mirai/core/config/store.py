@@ -73,6 +73,16 @@ def load_model_config() -> ModelConfig:
     config.chat_append_tool_use_instruction = _env_bool(
         "MIRAI_CHAT_APPEND_TOOL_INSTRUCTION", config.chat_append_tool_use_instruction
     )
+    config.edge_tools_enable_dynamic_routing = _env_bool(
+        "MIRAI_EDGE_TOOLS_DYNAMIC_ROUTING", config.edge_tools_enable_dynamic_routing
+    )
+
+    edge_limit = os.getenv("MIRAI_EDGE_TOOLS_RETRIEVAL_LIMIT")
+    if edge_limit:
+        try:
+            config.edge_tools_retrieval_limit = max(0, min(200, int(edge_limit.strip())))
+        except ValueError:
+            pass
 
     tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if tg_token and tg_token.strip():

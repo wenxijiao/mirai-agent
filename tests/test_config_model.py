@@ -9,3 +9,5 @@ def test_model_config_default_provider():
     assert cfg.embedding_provider == "ollama"
     assert cfg.chat_append_current_time is True
     assert cfg.chat_append_tool_use_instruction is True
+    assert cfg.edge_tools_enable_dynamic_routing is True
+    assert cfg.edge_tools_retrieval_limit == 20

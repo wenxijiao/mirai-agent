@@ -2,6 +2,8 @@
 
 Edge tools let the LLM call functions inside your own app or device process. Your app connects to the Mirai server over WebSocket, registers functions as tools, and the AI invokes them as needed.
 
+Mirai loads core server tools on every turn, but Edge tools are dynamically routed by default. All tools registered by connected Edge processes stay in the server registry; for each chat turn Mirai uses the configured embedding model to select the most relevant Edge tool schemas (default: 20) before calling the LLM.
+
 ## Quick Start
 
 ```bash
@@ -37,6 +39,26 @@ This creates `mirai_tools/`, a `.env` file, and language-specific setup template
 4. Call the generated initialization function from your real app entry point
 
 `mirai --edge` only scaffolds files. Your own app still needs to call the generated `init_*` / `Init*` function at runtime.
+
+## Tool Routing
+
+Use meaningful Edge names when possible. Names like `Bedroom`, `Memory App`, or `Game NPC` become part of each Edge tool's retrieval document, so a request like "turn on the bedroom light" will prefer light-related tools registered under the bedroom Edge. If the Edge name is generic (for example `device-001`), Mirai still falls back to the function name, description, and parameter descriptions, so good tool descriptions remain important.
+
+When an Edge reconnects, updates, or removes tools, the next chat turn uses the current in-memory registry. There is no persistent per-tool routing file to clean up; embedding vectors are cached in memory only and old deleted tools are no longer referenced.
+
+Configure the per-turn Edge tool budget with:
+
+```bash
+mirai --tool-routing --edge-tools-limit 30
+```
+
+Or via HTTP:
+
+```bash
+curl -X PUT "$MIRAI_SERVER_URL/config/model" \
+  -H "Content-Type: application/json" \
+  -d '{"edge_tools_enable_dynamic_routing":true,"edge_tools_retrieval_limit":30}'
+```
 
 ## SDK Overview
 

@@ -28,6 +28,11 @@ class ModelConfig(BaseModel):
     # Appended to the system message each chat request (can disable to save tokens / avoid English policy text).
     chat_append_current_time: bool = True
     chat_append_tool_use_instruction: bool = True
+    # Tool routing: core server tools stay loaded; edge tools are ranked and capped per turn.
+    edge_tools_enable_dynamic_routing: bool = True
+    edge_tools_retrieval_limit: int = Field(default=20, ge=0, le=200)
+    core_tools_always_include: bool = True
+    core_tools_allow_disable: bool = True
     # Telegram bot (optional): token in config or TELEGRAM_BOT_TOKEN; empty allowed_user_ids = no restriction
     telegram_bot_token: str | None = None
     telegram_allowed_user_ids: list[int] = Field(default_factory=list)

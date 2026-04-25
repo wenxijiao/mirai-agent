@@ -559,6 +559,8 @@ def _model_config_public_dict() -> dict:
         "memory_max_related_messages": runtime.memory_max_related_messages,
         "chat_append_current_time": runtime.chat_append_current_time,
         "chat_append_tool_use_instruction": runtime.chat_append_tool_use_instruction,
+        "edge_tools_enable_dynamic_routing": runtime.edge_tools_enable_dynamic_routing,
+        "edge_tools_retrieval_limit": runtime.edge_tools_retrieval_limit,
         "openai_api_key_saved": bool(saved.openai_api_key and str(saved.openai_api_key).strip()),
         "gemini_api_key_saved": bool(saved.gemini_api_key and str(saved.gemini_api_key).strip()),
         "claude_api_key_saved": bool(saved.claude_api_key and str(saved.claude_api_key).strip()),
@@ -604,6 +606,10 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         config.chat_append_current_time = request.chat_append_current_time
     if request.chat_append_tool_use_instruction is not None:
         config.chat_append_tool_use_instruction = request.chat_append_tool_use_instruction
+    if request.edge_tools_enable_dynamic_routing is not None:
+        config.edge_tools_enable_dynamic_routing = request.edge_tools_enable_dynamic_routing
+    if request.edge_tools_retrieval_limit is not None:
+        config.edge_tools_retrieval_limit = request.edge_tools_retrieval_limit
     if request.openai_api_key is not None and request.openai_api_key.strip():
         config.openai_api_key = request.openai_api_key.strip()
         keys_or_base_changed = True

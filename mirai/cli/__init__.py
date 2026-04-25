@@ -20,9 +20,11 @@ from mirai.core.config import (
     get_saved_connection_code,
     get_telegram_bot_token,
     load_model_config,
+    load_saved_model_config,
     run_model_setup,
     save_connection_code,
     save_line_channel_access_token,
+    save_model_config,
     save_line_channel_secret,
     save_telegram_bot_token,
 )
@@ -809,6 +811,41 @@ def prepare_client_environment(scope: str) -> dict:
     return env
 
 
+def run_tool_routing_config(args) -> None:
+    """Show or update edge tool routing settings in ~/.mirai/config.json."""
+
+    if args.enable_edge_tool_routing and args.disable_edge_tool_routing:
+        raise SystemExit("  Use either --enable-edge-tool-routing or --disable-edge-tool-routing, not both.")
+
+    config = load_saved_model_config()
+    changed = False
+
+    if args.edge_tools_limit is not None:
+        if args.edge_tools_limit < 0 or args.edge_tools_limit > 200:
+            raise SystemExit("  --edge-tools-limit must be between 0 and 200.")
+        config.edge_tools_retrieval_limit = args.edge_tools_limit
+        changed = True
+
+    if args.enable_edge_tool_routing:
+        config.edge_tools_enable_dynamic_routing = True
+        changed = True
+    elif args.disable_edge_tool_routing:
+        config.edge_tools_enable_dynamic_routing = False
+        changed = True
+
+    if changed:
+        save_model_config(config)
+        print(f"  Tool routing settings saved to {CONFIG_PATH}")
+
+    effective = load_model_config()
+    print()
+    print("  Mirai tool routing")
+    print(f"  Edge dynamic routing: {'enabled' if effective.edge_tools_enable_dynamic_routing else 'disabled'}")
+    print(f"  Edge tools per turn:  {effective.edge_tools_retrieval_limit}")
+    print("  Core tools:           always loaded when enabled")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Mirai command line interface",
@@ -834,8 +871,26 @@ def main():
     )
     group.add_argument("--demo", action="store_true", help="Run the Smart Home + Planner (schedule) demo")
     group.add_argument("--setup", action="store_true", help="Configure Mirai models")
+    group.add_argument("--tool-routing", action="store_true", help="Show or configure edge tool routing")
     group.add_argument("--cleanup", action="store_true", help="Delete Mirai user data")
     group.add_argument("--cleanup-memory", action="store_true", help="Delete Mirai memory only")
+    parser.add_argument(
+        "--edge-tools-limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --tool-routing: edge tool schemas exposed per turn (0-200, default 20)",
+    )
+    parser.add_argument(
+        "--enable-edge-tool-routing",
+        action="store_true",
+        help="With --tool-routing: rank and cap edge tools per turn",
+    )
+    parser.add_argument(
+        "--disable-edge-tool-routing",
+        action="store_true",
+        help="With --tool-routing: pass all enabled edge tools through",
+    )
     parser.add_argument(
         "--telegram",
         action="store_true",
@@ -853,11 +908,16 @@ def main():
 
     if args.telegram and args.line:
         raise SystemExit("  Use either --telegram or --line, not both.")
+    if not args.tool_routing and (
+        args.edge_tools_limit is not None or args.enable_edge_tool_routing or args.disable_edge_tool_routing
+    ):
+        raise SystemExit("  Use --edge-tools-limit/--enable-edge-tool-routing/--disable-edge-tool-routing with --tool-routing.")
 
     if (args.telegram or args.line) and (
         args.ui or args.chat or args.edge or args.demo or args.setup or args.cleanup or args.cleanup_memory
+        or args.tool_routing
     ):
-        raise SystemExit("  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup.")
+        raise SystemExit("  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup/--tool-routing.")
 
     try:
         if args.server and args.telegram:
@@ -872,6 +932,8 @@ def main():
             run_line_standalone()
         elif args.setup:
             run_model_setup(force=True)
+        elif args.tool_routing:
+            run_tool_routing_config(args)
         elif args.cleanup:
             run_cleanup()
         elif args.cleanup_memory:

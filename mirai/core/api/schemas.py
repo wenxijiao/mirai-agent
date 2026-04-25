@@ -69,6 +69,8 @@ class ModelConfigUpdateRequest(BaseModel):
     memory_max_related_messages: int | None = Field(default=None, ge=0, le=100)
     chat_append_current_time: bool | None = None
     chat_append_tool_use_instruction: bool | None = None
+    edge_tools_enable_dynamic_routing: bool | None = None
+    edge_tools_retrieval_limit: int | None = Field(default=None, ge=0, le=200)
     # Stored in ~/.mirai/config.json; omit or leave empty to keep existing value.
     openai_api_key: str | None = None
     gemini_api_key: str | None = None

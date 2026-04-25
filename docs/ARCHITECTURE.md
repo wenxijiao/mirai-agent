@@ -41,6 +41,8 @@ Server-side tools are Python functions decorated with `@mirai_tool` in `mirai/to
 
 Edge tools are registered by remote clients over WebSocket at `/ws/edge`. Each client sends a `register` message with tool schemas on connect. The server prefixes tool names with the edge name and stores them in `EDGE_TOOLS_REGISTRY`.
 
+Core server tools are loaded into every model request when enabled. Edge tools are routed dynamically: for each chat turn, Mirai builds retrieval documents from the Edge name, aliases, tool name, description, and parameter descriptions, embeds them with the configured embedding model, and sends only the most relevant Edge tool schemas to the provider (default: 20). This keeps the model-facing tool set small even when many Edge processes register hundreds of functions.
+
 When the LLM selects an edge tool, the server sends a `tool_call` message to the relevant client. The client executes the function and returns a `tool_result`.
 
 ## Admin API
