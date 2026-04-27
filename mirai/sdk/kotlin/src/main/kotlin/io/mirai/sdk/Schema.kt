@@ -31,5 +31,8 @@ fun buildToolSchema(opts: RegisterOptions): JsonObject {
     if (opts.requireConfirmation) {
         schema.addProperty("require_confirmation", true)
     }
+    if (opts.alwaysInclude) {
+        schema.addProperty("always_include", true)
+    }
     return schema
 }

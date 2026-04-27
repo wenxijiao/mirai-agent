@@ -33,6 +33,9 @@ export function buildToolSchema(opts: RegisterOptions): Record<string, unknown> 
   if (opts.requireConfirmation) {
     schema.require_confirmation = true;
   }
+  if (opts.alwaysInclude) {
+    schema.always_include = true;
+  }
 
   return schema;
 }

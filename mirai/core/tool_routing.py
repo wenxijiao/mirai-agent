@@ -50,6 +50,7 @@ class ToolCatalogEntry:
     device_name: str = ""
     device_aliases: tuple[str, ...] = ()
     enabled: bool = True
+    always_include: bool = False
 
     @property
     def search_text(self) -> str:
@@ -418,6 +419,7 @@ class ToolCatalog:
                         device_name=device_name,
                         device_aliases=aliases,
                         enabled=True,
+                        always_include=bool(entry.get("always_include")),
                     )
                 )
         return out
@@ -443,19 +445,26 @@ def select_tool_schemas(
     dynamic_enabled = bool(cfg.edge_tools_enable_dynamic_routing)
     edge_limit = max(0, min(200, int(cfg.edge_tools_retrieval_limit)))
     forced_names = set(force_edge_tool_names or set())
+    always_entries = [entry for entry in edge_entries if entry.always_include]
+    always_names = {entry.name for entry in always_entries}
 
     if not dynamic_enabled:
         selected_edge = edge_entries
     elif edge_limit <= 0:
-        selected_edge = [entry for entry in edge_entries if entry.name in forced_names]
+        selected_edge = always_entries + [
+            entry for entry in edge_entries if entry.name in forced_names and entry.name not in always_names
+        ]
     elif len(edge_entries) <= edge_limit:
         selected_edge = edge_entries
     else:
-        forced = [entry for entry in edge_entries if entry.name in forced_names]
-        forced_name_set = {entry.name for entry in forced}
-        remaining = [entry for entry in edge_entries if entry.name not in forced_name_set]
+        forced = [
+            entry for entry in edge_entries if entry.name in forced_names and entry.name not in always_names
+        ]
+        base = _dedupe_entries(always_entries + forced)
+        base_name_set = {entry.name for entry in base}
+        remaining = [entry for entry in edge_entries if entry.name not in base_name_set]
         scored = _score_edge_tools(query or "", remaining, embed_model=cfg.embedding_model)
-        selected_edge = forced + [entry for _, entry in scored[: max(0, edge_limit - len(forced))]]
+        selected_edge = base + [entry for _, entry in scored[: max(0, edge_limit - len(base))]]
         selected_edge = _dedupe_entries(selected_edge)
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)

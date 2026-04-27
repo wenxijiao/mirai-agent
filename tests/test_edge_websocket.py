@@ -45,12 +45,16 @@ def test_edge_websocket_register_and_disconnect():
                             "description": "Returns pong",
                             "parameters": {"type": "object", "properties": {}, "required": []},
                         },
+                        "always_include": True,
                     }
                 ],
             }
         )
         assert _wait_for_edge("test-device"), "Edge device did not register in time."
-        assert "edge_test-device__ping" in EDGE_TOOLS_REGISTRY.get("test-device", {})
+        entry = EDGE_TOOLS_REGISTRY.get("test-device", {}).get("edge_test-device__ping")
+        assert entry is not None
+        assert entry["always_include"] is True
+        assert "always_include" not in entry["schema"]
 
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:

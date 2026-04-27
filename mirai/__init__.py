@@ -39,6 +39,7 @@ def register(
     returns: str | None = None,
     timeout: int | None = None,
     require_confirmation: bool = False,
+    always_include: bool = False,
 ) -> None:
     """Register a tool on the default agent.
 
@@ -57,6 +58,7 @@ def register(
         returns=returns,
         timeout=timeout,
         require_confirmation=require_confirmation,
+        always_include=always_include,
     )
 
 

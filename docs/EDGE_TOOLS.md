@@ -46,6 +46,8 @@ Use meaningful Edge names when possible. Names like `Bedroom`, `Memory App`, or 
 
 When an Edge reconnects, updates, or removes tools, the next chat turn uses the current in-memory registry. There is no persistent per-tool routing file to clean up; embedding vectors are cached in memory only and old deleted tools are no longer referenced.
 
+For an Edge function that must be available to the model on every turn, register it with `always_include=True` (or the SDK equivalent such as `alwaysInclude: true`). This is off by default and should be reserved for small, high-value tools because it bypasses dynamic Edge-tool retrieval for that function.
+
 Configure the per-turn Edge tool budget with:
 
 ```bash
@@ -178,6 +180,7 @@ agent.register(RegisterOptions {
     parameters: vec![],
     timeout: None,
     require_confirmation: false,
+    always_include: false,
     handler: Arc::new(|args| args.string("q")),
 });
 agent.run_in_background();

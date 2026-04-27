@@ -45,6 +45,7 @@ struct FMiraiRegisterOptions
     FMiraiToolHandler Handler;
     int32 Timeout = 0;
     bool bRequireConfirmation = false;
+    bool bAlwaysInclude = false;
 };
 
 /**

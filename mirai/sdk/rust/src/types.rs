@@ -73,6 +73,7 @@ pub struct RegisterOptions {
     pub parameters: Vec<ToolParameter>,
     pub timeout: Option<u32>,
     pub require_confirmation: bool,
+    pub always_include: bool,
     pub handler: ToolHandler,
 }
 

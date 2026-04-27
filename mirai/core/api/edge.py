@@ -177,10 +177,12 @@ async def handle_edge_peer(peer):
             schema_copy["function"]["name"] = prefixed_name
             tool_timeout = schema_copy.pop("timeout", None)
             require_confirmation = bool(schema_copy.pop("require_confirmation", False))
+            always_include = bool(schema_copy.pop("always_include", False))
             EDGE_TOOLS_REGISTRY[connection_key][prefixed_name] = {
                 "schema": schema_copy,
                 "timeout": tool_timeout,
                 "require_confirmation": require_confirmation,
+                "always_include": always_include,
             }
 
         apply_edge_tool_confirmation_policy(
@@ -224,10 +226,12 @@ async def handle_edge_peer(peer):
                     schema_copy["function"]["name"] = prefixed_name
                     tool_timeout = schema_copy.pop("timeout", None)
                     require_confirmation = bool(schema_copy.pop("require_confirmation", False))
+                    always_include = bool(schema_copy.pop("always_include", False))
                     EDGE_TOOLS_REGISTRY[connection_key][prefixed_name] = {
                         "schema": schema_copy,
                         "timeout": tool_timeout,
                         "require_confirmation": require_confirmation,
+                        "always_include": always_include,
                     }
                 apply_edge_tool_confirmation_policy(
                     tool_prefix,

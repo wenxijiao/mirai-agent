@@ -44,6 +44,12 @@ pub fn build_tool_schema(opts: &RegisterOptions) -> Value {
             .unwrap()
             .insert("require_confirmation".to_string(), json!(true));
     }
+    if opts.always_include {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("always_include".to_string(), json!(true));
+    }
 
     schema
 }

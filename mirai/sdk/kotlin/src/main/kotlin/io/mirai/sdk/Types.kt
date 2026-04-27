@@ -34,6 +34,7 @@ data class RegisterOptions(
     val parameters: List<ToolParameter> = emptyList(),
     val timeout: Int? = null,
     val requireConfirmation: Boolean = false,
+    val alwaysInclude: Boolean = false,
     val handler: ToolHandler,
 )
 

@@ -51,6 +51,9 @@ internal static class SchemaBuilder
         if (opts.RequireConfirmation)
             schema["require_confirmation"] = true;
 
+        if (opts.AlwaysInclude)
+            schema["always_include"] = true;
+
         return schema;
     }
 }

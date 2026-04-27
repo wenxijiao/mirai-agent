@@ -86,7 +86,8 @@ inline nlohmann::json buildToolSchema(
     const std::string& description,
     const std::vector<ToolParameter>& parameters,
     bool requireConfirmation = false,
-    int timeout = 0
+    int timeout = 0,
+    bool alwaysInclude = false
 ) {
     nlohmann::json properties = nlohmann::json::object();
     std::vector<std::string> requiredParams;
@@ -119,6 +120,9 @@ inline nlohmann::json buildToolSchema(
     }
     if (requireConfirmation) {
         schema["require_confirmation"] = true;
+    }
+    if (alwaysInclude) {
+        schema["always_include"] = true;
     }
 
     return schema;
@@ -171,6 +175,7 @@ struct RegisterOptions {
     ToolHandler handler;
     int timeout = 0;
     bool requireConfirmation = false;
+    bool alwaysInclude = false;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -807,7 +812,7 @@ public:
     void registerTool(RegisterOptions opts) {
         auto schema = buildToolSchema(
             opts.name, opts.description, opts.parameters,
-            opts.requireConfirmation, opts.timeout
+            opts.requireConfirmation, opts.timeout, opts.alwaysInclude
         );
 
         std::lock_guard<std::mutex> lock(toolsMutex_);

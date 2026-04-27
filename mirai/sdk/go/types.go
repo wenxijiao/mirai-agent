@@ -115,6 +115,7 @@ type RegisterOptions struct {
 	Parameters          []ToolParameter
 	Timeout             *int // per-tool timeout override (seconds)
 	RequireConfirmation bool
+	AlwaysInclude       bool // include this edge tool in every model request
 	Handler             ToolHandler
 }
 

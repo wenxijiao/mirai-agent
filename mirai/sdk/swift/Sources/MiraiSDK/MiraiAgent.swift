@@ -254,6 +254,7 @@ public final class MiraiAgent: @unchecked Sendable {
     ///   - timeout: Per-tool execution timeout in seconds.
     ///   - requireConfirmation: If true, the user must approve before the
     ///     server invokes this tool.
+    ///   - alwaysInclude: If true, this edge tool is exposed to the model on every turn.
     ///   - handler: The closure to execute. Receives ``ToolArguments`` and
     ///     returns a string result. May be async and throw.
     public func register(
@@ -262,6 +263,7 @@ public final class MiraiAgent: @unchecked Sendable {
         parameters: [ToolParameter] = [],
         timeout: Int? = nil,
         requireConfirmation: Bool = false,
+        alwaysInclude: Bool = false,
         handler: @escaping @Sendable (ToolArguments) async throws -> String
     ) {
         let schema = buildToolSchema(
@@ -269,7 +271,8 @@ public final class MiraiAgent: @unchecked Sendable {
             description: description,
             parameters: parameters,
             timeout: timeout,
-            requireConfirmation: requireConfirmation
+            requireConfirmation: requireConfirmation,
+            alwaysInclude: alwaysInclude
         )
         tools[name] = RegisteredTool(
             schema: schema,

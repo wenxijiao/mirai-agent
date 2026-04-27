@@ -281,6 +281,27 @@ def test_zero_edge_limit_hides_unforced_edge_tools(monkeypatch):
     assert len(decision.tools) == len(TOOL_REGISTRY)
 
 
+def test_always_include_edge_tool_bypasses_dynamic_routing_limit(monkeypatch):
+    monkeypatch.setattr(
+        "mirai.core.tool_routing.load_model_config",
+        lambda: ModelConfig(edge_tools_enable_dynamic_routing=True, edge_tools_retrieval_limit=0),
+    )
+    registry = _edge_registry(12)
+    registry["lab"]["edge_lab__set_kitchen_lights"]["always_include"] = True
+
+    decision = select_tool_schemas(
+        identity=LOCAL_IDENTITY,
+        query="generic factory operation",
+        session_id="s1",
+        disabled_tools=set(),
+        edge_registry=registry,
+    )
+
+    selected = [entry.name for entry in decision.selected_edge_tools]
+    assert selected == ["edge_lab__set_kitchen_lights"]
+    assert "edge_lab__set_kitchen_lights" in [tool["function"]["name"] for tool in decision.tools]
+
+
 def test_routing_and_usage_telemetry_are_recorded():
     select_tool_schemas(
         identity=LOCAL_IDENTITY,

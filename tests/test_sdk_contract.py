@@ -145,18 +145,20 @@ def test_tool_result_message_shape():
         assert key in msg
 
 
-# ── Optional fields (timeout, require_confirmation) ──
+# ── Optional fields (timeout, require_confirmation, always_include) ──
 
 
 def test_optional_schema_fields_accepted():
-    """Server pops 'timeout' and 'require_confirmation' from the schema."""
+    """Server pops routing metadata fields from the schema."""
     schema_with_extras = {
         **REFERENCE_TOOL_SCHEMA,
         "timeout": 60,
         "require_confirmation": True,
+        "always_include": True,
     }
     assert schema_with_extras["timeout"] == 60
     assert schema_with_extras["require_confirmation"] is True
+    assert schema_with_extras["always_include"] is True
 
 
 # ── Go SDK RegisterOptions field names match server expectations ──
@@ -167,7 +169,7 @@ def test_go_register_options_fields():
     with open(path, encoding="utf-8") as f:
         source = f.read()
 
-    for field in ("Name", "Description", "Parameters", "Timeout", "RequireConfirmation", "Handler"):
+    for field in ("Name", "Description", "Parameters", "Timeout", "RequireConfirmation", "AlwaysInclude", "Handler"):
         assert field in source, f"Go RegisterOptions missing field: {field}"
 
 
@@ -179,7 +181,7 @@ def test_ts_register_options_fields():
     with open(path, encoding="utf-8") as f:
         source = f.read()
 
-    for field in ("name", "description", "parameters", "timeout", "requireConfirmation", "handler"):
+    for field in ("name", "description", "parameters", "timeout", "requireConfirmation", "alwaysInclude", "handler"):
         assert field in source, f"TS RegisterOptions missing field: {field}"
 
 

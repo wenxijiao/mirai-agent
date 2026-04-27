@@ -53,6 +53,7 @@ class RegisterOptions {
   final List<ToolParameter> parameters;
   final int? timeout;
   final bool requireConfirmation;
+  final bool alwaysInclude;
   final MiraiToolHandler handler;
 
   RegisterOptions({
@@ -61,6 +62,7 @@ class RegisterOptions {
     this.parameters = const [],
     this.timeout,
     this.requireConfirmation = false,
+    this.alwaysInclude = false,
     required this.handler,
   });
 }

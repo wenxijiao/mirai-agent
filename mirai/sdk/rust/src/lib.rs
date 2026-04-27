@@ -19,6 +19,7 @@
 //!     }],
 //!     require_confirmation: false,
 //!     timeout: None,
+//!     always_include: false,
 //!     handler: std::sync::Arc::new(|args| {
 //!         format!("Hello, {}!", args.string("name"))
 //!     }),

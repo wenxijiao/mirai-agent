@@ -187,6 +187,10 @@ TSharedPtr<FJsonObject> FMiraiAgent::BuildToolSchema(const FMiraiRegisterOptions
     {
         Schema->SetBoolField(TEXT("require_confirmation"), true);
     }
+    if (Opts.bAlwaysInclude)
+    {
+        Schema->SetBoolField(TEXT("always_include"), true);
+    }
 
     return Schema;
 }

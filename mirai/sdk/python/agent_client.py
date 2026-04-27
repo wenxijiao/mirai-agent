@@ -241,6 +241,8 @@ def _wire_tool_schema(tool_entry: dict) -> dict:
     sch = copy.deepcopy(tool_entry["schema"])
     if tool_entry.get("require_confirmation"):
         sch["require_confirmation"] = True
+    if tool_entry.get("always_include"):
+        sch["always_include"] = True
     return sch
 
 
@@ -445,6 +447,7 @@ class MiraiAgent:
         returns: str | None = None,
         timeout: int | None = None,
         require_confirmation: bool = False,
+        always_include: bool = False,
     ) -> None:
         """Register a tool function.
 
@@ -460,6 +463,10 @@ class MiraiAgent:
         **Human-in-the-loop:** Set ``require_confirmation=True`` for
         tools with irreversible side effects. The **server** asks the user
         in the web UI or in ``mirai --chat`` (not on the edge device).
+
+        **Tool routing:** Set ``always_include=True`` for edge tools whose
+        schema must be exposed to the model on every turn, bypassing dynamic
+        edge-tool retrieval for that tool.
 
         **Cancellation behaviour:** When the server cancels an in-flight
         tool call (timeout, user disconnect, or reconnect), the running
@@ -483,6 +490,8 @@ class MiraiAgent:
             require_confirmation: If True, the user must approve in the
                 Mirai UI or terminal chat before the server invokes this tool
                 on the edge.
+            always_include: If True, this edge tool is included in every
+                model request. Defaults to False.
         """
         schema = _build_tool_schema(func, name, description, params, returns)
         if timeout is not None:
@@ -492,6 +501,7 @@ class MiraiAgent:
             "schema": schema,
             "callable": func,
             "require_confirmation": require_confirmation,
+            "always_include": always_include,
         }
 
     def run_in_background(self) -> None:

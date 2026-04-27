@@ -51,6 +51,9 @@ def init_mirai():
     # Dangerous tools: user confirms in the Mirai web UI or `mirai --chat` (not on device):
     # agent.register(delete_all, "Delete all data", require_confirmation=True)
     #
+    # High-value tools that should bypass dynamic routing every turn:
+    # agent.register(get_status, "Read current app status", always_include=True)
+    #
     # Tool confirmation choices (Tools page / chat "always allow") are saved next to your
     # .env as .mirai_tool_confirmation.json (override with MIRAI_TOOL_CONFIRMATION_PATH).
 

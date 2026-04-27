@@ -41,7 +41,8 @@ func buildToolSchema(
     description: String,
     parameters: [ToolParameter],
     timeout: Int? = nil,
-    requireConfirmation: Bool = false
+    requireConfirmation: Bool = false,
+    alwaysInclude: Bool = false
 ) -> [String: Any] {
     var properties: [String: Any] = [:]
     var required: [String] = []
@@ -78,6 +79,9 @@ func buildToolSchema(
     }
     if requireConfirmation {
         schema["require_confirmation"] = true
+    }
+    if alwaysInclude {
+        schema["always_include"] = true
     }
 
     return schema

@@ -63,5 +63,6 @@ export interface RegisterOptions {
   parameters?: ToolParameter[];
   timeout?: number;
   requireConfirmation?: boolean;
+  alwaysInclude?: boolean;
   handler: ToolHandler;
 }

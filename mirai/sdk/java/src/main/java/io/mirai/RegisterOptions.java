@@ -13,6 +13,7 @@ public class RegisterOptions {
     private List<ToolParameter> parameters = new ArrayList<>();
     private Integer timeout;
     private boolean requireConfirmation;
+    private boolean alwaysInclude;
     private ToolHandler handler;
 
     public RegisterOptions name(String name) { this.name = name; return this; }
@@ -21,6 +22,7 @@ public class RegisterOptions {
     public RegisterOptions parameters(List<ToolParameter> params) { this.parameters = params; return this; }
     public RegisterOptions timeout(int seconds) { this.timeout = seconds; return this; }
     public RegisterOptions requireConfirmation(boolean v) { this.requireConfirmation = v; return this; }
+    public RegisterOptions alwaysInclude(boolean v) { this.alwaysInclude = v; return this; }
     public RegisterOptions handler(ToolHandler h) { this.handler = h; return this; }
 
     public String getName() { return name; }
@@ -28,5 +30,6 @@ public class RegisterOptions {
     public List<ToolParameter> getParameters() { return parameters; }
     public Integer getTimeout() { return timeout; }
     public boolean isRequireConfirmation() { return requireConfirmation; }
+    public boolean isAlwaysInclude() { return alwaysInclude; }
     public ToolHandler getHandler() { return handler; }
 }

@@ -43,6 +43,9 @@ public final class SchemaBuilder {
         if (opts.isRequireConfirmation()) {
             schema.addProperty("require_confirmation", true);
         }
+        if (opts.isAlwaysInclude()) {
+            schema.addProperty("always_include", true);
+        }
 
         return schema;
     }
