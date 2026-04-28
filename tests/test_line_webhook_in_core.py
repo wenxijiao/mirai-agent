@@ -83,3 +83,52 @@ def test_line_webhook_text_message_single_user(monkeypatch):
     with TestClient(api.app) as client:
         r = client.post("/line/webhook", content=body, headers={"X-Line-Signature": sig})
     assert r.status_code == 200
+
+
+def test_line_webhook_audio_message_transcribes_single_user(monkeypatch):
+    """Signed audio event in single-user mode → STT text is passed to chat."""
+    monkeypatch.setenv("MIRAI_LINE_INCORE", "1")
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "sec")
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "token")
+
+    seen: list[str] = []
+
+    async def _fake_transcribe(audio: bytes, *, filename: str, language: str | None = None):
+        from mirai.core.stt import TranscriptionResult
+
+        assert audio == b"voice-bytes"
+        assert filename == "line_audio_mid-audio.m4a"
+        assert language is None
+        return TranscriptionResult(text="transcribed text")
+
+    async def _stream_capture(_line_user_id, prompt, _session_id, *, use_http):
+        seen.append(prompt)
+        yield {"type": "text", "content": "ok"}
+
+    async def _content(self, message_id: str):
+        assert message_id == "mid-audio"
+        return b"voice-bytes"
+
+    monkeypatch.setattr("mirai.core.stt.transcribe_audio", _fake_transcribe)
+    monkeypatch.setattr("mirai.line.handlers.stream_line_chat", _stream_capture)
+    monkeypatch.setattr(LineMessagingClient, "get_message_content", _content)
+    monkeypatch.setattr(LineMessagingClient, "reply_message", _noop_coro)
+    monkeypatch.setattr(LineMessagingClient, "push_message", _noop_coro)
+    monkeypatch.setattr(LineMessagingClient, "show_loading_animation", _noop_coro)
+
+    payload = {
+        "events": [
+            {
+                "type": "message",
+                "replyToken": "dummy-reply-token",
+                "source": {"type": "user", "userId": "Uoss1"},
+                "message": {"type": "audio", "id": "mid-audio", "duration": 1000},
+            }
+        ]
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    sig = _sign(body, "sec")
+    with TestClient(api.app) as client:
+        r = client.post("/line/webhook", content=body, headers={"X-Line-Signature": sig})
+    assert r.status_code == 200
+    assert seen == ["transcribed text"]

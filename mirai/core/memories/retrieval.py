@@ -9,7 +9,7 @@ from typing import Any
 from mirai.core.memories.embedding_state import is_degenerate_vector
 from mirai.core.memories.models import MemoryCandidate
 
-_TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
 def tokenize(text: str) -> set[str]:
@@ -38,9 +38,11 @@ def kind_boost(kind: str, query: str) -> float:
     q = query.lower()
     if kind == "preference":
         return 0.25
-    if kind == "tool_observation" and any(word in q for word in ("tool", "工具", "调用", "结果", "失败", "error")):
+    if kind == "tool_observation" and any(word in q for word in ("tool", "call", "result", "failure", "error")):
         return 0.3
-    if kind in {"decision", "task_state"} and any(word in q for word in ("继续", "上次", "状态", "决定", "todo")):
+    if kind in {"decision", "task_state"} and any(
+        word in q for word in ("continue", "last", "state", "decision", "todo", "status")
+    ):
         return 0.2
     return 0.0
 

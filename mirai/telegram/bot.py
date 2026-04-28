@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import uuid
@@ -95,6 +96,30 @@ async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> 
         return True, ""
 
 
+async def _post_stt_transcribe(
+    connection: ConnectionConfig,
+    *,
+    session_id: str,
+    filename: str,
+    data: bytes,
+) -> tuple[bool, str]:
+    url = _api_url(connection, "/stt/transcribe")
+    headers = connection.auth_headers()
+    headers["Content-Type"] = "application/json"
+    payload = {
+        "session_id": session_id,
+        "filename": filename,
+        "content_base64": base64.standard_b64encode(data).decode("ascii"),
+    }
+    timeout = httpx.Timeout(10.0, read=600.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(url, json=payload, headers=headers)
+        if r.status_code >= 400:
+            return False, r.text[:500]
+        body = r.json()
+        return True, str(body.get("text") or "").strip()
+
+
 async def _get_model_config(connection: ConnectionConfig) -> dict[str, Any] | None:
     url = _api_url(connection, "/config/model")
     headers = connection.auth_headers()
@@ -146,7 +171,7 @@ def build_application():
             return
         await update.message.reply_text(
             "Mirai Telegram bridge.\n\n"
-            "Send a message to chat. You can attach photos or files (same size limits as the web UI).\n"
+            "Send a message to chat. You can attach photos, files, or voice/audio when STT is enabled.\n"
             "For one message: add a caption to the photo, or send text in a separate message.\n"
             "Commands:\n"
             "/clear — clear this chat's history\n"
@@ -178,9 +203,9 @@ def build_application():
             return
         if not context.args or not str(context.args[0]).strip():
             await update.message.reply_text(
-                "用法: /link <mirai_开头的访问令牌>\n"
-                "在 mirai-enterprise 服务器上执行: mirai-enterprise user-token <你的用户ID> 获取令牌。\n"
-                "多租户模式下需要链接后才能代表你的用户调用 API。"
+                "Usage: /link <mirai_... access token>\n"
+                "On mirai-enterprise, run: mirai-enterprise user-token <your_user_id> to get a token.\n"
+                "In multi-tenant mode you must link before the API can act as your user."
             )
             return
         token = str(context.args[0]).strip()
@@ -201,7 +226,9 @@ def build_application():
             await update.message.reply_text(_truncate_for_telegram(f"Link failed ({r.status_code}): {r.text[:500]}"))
             return
         save_token_for_telegram_user(int(tg_uid), token)
-        await update.message.reply_text("已成功关联。现在可以正常对话（多租户下将使用你的 Mirai 用户身份）。")
+        await update.message.reply_text(
+            "Linked successfully. You can chat as usual (multi-tenant mode uses your Mirai user identity)."
+        )
 
     async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id if update.effective_user else None):
@@ -220,12 +247,12 @@ def build_application():
 
     def _system_help_text() -> str:
         return (
-            "/system — 本会话系统提示词（仅影响当前 Telegram 会话，不写全局）\n\n"
-            "/system — 或 /system show — 查看当前生效内容\n"
-            "/system set <文本…> — 设置本会话覆盖\n"
-            "/system reset — 清除覆盖，恢复服务器全局默认\n"
-            "/system help — 本说明\n\n"
-            "多租户请先 /link。长提示词可用 Web/API 写入。"
+            "/system — Session system prompt (Telegram session only; does not change global)\n\n"
+            "/system — or /system show — show the effective prompt\n"
+            "/system set <text> — set a session override\n"
+            "/system reset — clear override; use server global default\n"
+            "/system help — this help\n\n"
+            "Multi-tenant: run /link first. Long prompts can be set via web UI or API."
         )
 
     async def system_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -241,7 +268,7 @@ def build_application():
             sp, err = await http_get_session_prompt(connection, session_id)
             if err:
                 hint = (
-                    f"需要鉴权：多租户请先 /link <mirai_令牌>。详情: {err[:180]}"
+                    f"Auth required: multi-tenant users run /link <mirai_token> first. Detail: {err[:180]}"
                     if ("401" in err or "403" in err)
                     else err
                 )
@@ -253,10 +280,10 @@ def build_application():
                 return
             if sp.get("is_custom") and sp.get("system_prompt"):
                 effective = str(sp["system_prompt"])
-                label = "本会话自定义"
+                label = "Session override"
             else:
                 effective = str(gp.get("system_prompt") or "")
-                label = "全局默认"
+                label = "Global default"
             text = format_effective_prompt_reply(effective=effective, source_label=label)
             await _send_long_text(lambda t: update.message.reply_text(t), text)
 
@@ -269,22 +296,22 @@ def build_application():
         if args[0].lower() == "reset":
             ok, err = await http_delete_session_prompt(connection, session_id)
             if ok:
-                await update.message.reply_text("已清除本会话覆盖，将使用服务器全局系统提示词。")
+                await update.message.reply_text("Session override cleared; using the global system prompt.")
             else:
-                await update.message.reply_text(_truncate_for_telegram(f"失败: {err}"))
+                await update.message.reply_text(_truncate_for_telegram(f"Failed: {err}"))
             return
         if args[0].lower() == "set":
             rest = " ".join(args[1:]).strip()
             if not rest:
-                await update.message.reply_text("用法: /system set <提示词内容>")
+                await update.message.reply_text("Usage: /system set <prompt text>")
                 return
             ok, err = await http_put_session_prompt(connection, session_id, rest)
             if ok:
-                await update.message.reply_text("已更新本会话系统提示词。")
+                await update.message.reply_text("Session system prompt updated.")
             else:
-                await update.message.reply_text(_truncate_for_telegram(f"失败: {err}"))
+                await update.message.reply_text(_truncate_for_telegram(f"Failed: {err}"))
             return
-        await update.message.reply_text("未知子命令。发送 /system help 查看说明。")
+        await update.message.reply_text("Unknown subcommand. Send /system help for usage.")
 
     async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Must answer the callback quickly; unblock the Future so /chat can continue.
@@ -372,6 +399,47 @@ def build_application():
 
         return True
 
+    async def _append_transcribed_telegram_audio(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        connection: ConnectionConfig,
+        session_id: str,
+        parts: list[str],
+    ) -> bool:
+        msg = update.message
+        if not msg:
+            return True
+        voice = msg.voice
+        audio = msg.audio
+        if not voice and not audio:
+            return True
+        media = voice or audio
+        if getattr(media, "file_size", None) and media.file_size > MAX_UPLOAD_BYTES:
+            await msg.reply_text(f"Audio too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).")
+            return False
+        try:
+            tg_file = await context.bot.get_file(media.file_id)
+            data = await tg_file.download_as_bytearray()
+        except Exception as exc:
+            await msg.reply_text(_truncate_for_telegram(f"Could not download audio from Telegram: {exc}"))
+            return False
+        if len(data) > MAX_UPLOAD_BYTES:
+            await msg.reply_text(f"Audio too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).")
+            return False
+        if audio and audio.file_name:
+            filename = audio.file_name
+        else:
+            filename = f"telegram_voice_{media.file_unique_id}.ogg"
+        ok, text = await _post_stt_transcribe(connection, session_id=session_id, filename=filename, data=bytes(data))
+        if not ok:
+            await msg.reply_text(_truncate_for_telegram(f"Voice transcription failed: {text}"))
+            return False
+        if not text:
+            await msg.reply_text("Voice transcription did not produce any text.")
+            return False
+        parts.append(text)
+        return True
+
     async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message:
             return
@@ -382,11 +450,18 @@ def build_application():
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
         session_id = _session_id_for_user(user_id)
+        connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
 
         parts: list[str] = []
         caption_or_text = (update.message.text or update.message.caption or "").strip()
         if caption_or_text:
             parts.append(caption_or_text)
+
+        if update.message.voice or update.message.audio:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            ok = await _append_transcribed_telegram_audio(update, context, connection, session_id, parts)
+            if not ok:
+                return
 
         if update.message.photo or update.message.document:
             ok = await _append_saved_paths_from_telegram_media(update, context, session_id, parts)
@@ -398,7 +473,6 @@ def build_application():
 
         prompt = "\n".join(parts)
 
-        connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
         url = _chat_url(connection)
@@ -507,7 +581,7 @@ def build_application():
     # other paths are read via the server `read_file` tool when needed.
     app.add_handler(
         MessageHandler(
-            (filters.TEXT | filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
+            (filters.TEXT | filters.PHOTO | filters.Document.ALL | filters.VOICE | filters.AUDIO) & ~filters.COMMAND,
             on_message,
         )
     )

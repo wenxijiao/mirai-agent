@@ -847,6 +847,10 @@ def run_tool_routing_config(args) -> None:
 
 
 def main():
+    from mirai.core.env_load import load_mirai_dotenv
+
+    load_mirai_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Mirai command line interface",
         epilog="OSS edition: local / LAN single-user. Multi-tenant + remote relay live in mirai-enterprise.",

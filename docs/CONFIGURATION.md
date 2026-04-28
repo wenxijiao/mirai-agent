@@ -38,6 +38,25 @@
 | `MIRAI_CHAT_APPEND_CURRENT_TIME` | Set to `1`/`true` to append the current time to the system prompt |
 | `MIRAI_CHAT_APPEND_TOOL_INSTRUCTION` | Set to `1`/`true` to append tool-use instructions to the system prompt |
 
+### Speech-to-Text
+
+| Variable | Description |
+|---|---|
+| `MIRAI_STT_PROVIDER` | STT provider (`disabled` or `whisper`; default `disabled`) |
+| `MIRAI_STT_BACKEND` | Whisper backend (`faster-whisper`; default) |
+| `MIRAI_STT_MODEL` | Multilingual Whisper model (`tiny`, `base`, `small`, `medium`, `large`, or `turbo`) |
+| `MIRAI_STT_MODEL_DIR` | Model cache directory (default `~/.mirai/models/whisper`) |
+| `MIRAI_STT_LANGUAGE` | STT language hint (default `auto`) |
+| `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` | Optional Hugging Face Hub token for higher rate limits when downloading Whisper weights (same env vars Hugging Face tools expect). |
+
+Put `HF_TOKEN=hf_...` in **`~/.mirai/.env`** or **`./.env`** if you want; Mirai loads those files early via `python-dotenv` (without overwriting variables already set in your shell).
+
+Speech-to-text is optional and disabled by default. Run `mirai --setup` to enable local multilingual Whisper for Telegram voice/audio, LINE audio, audio uploads in the web UI, or `/transcribe <path>` in `mirai --chat`.
+
+The **faster-whisper** Python package is included in the default `mirai-agent` install. **Model weight files** are large and are not in the git repository; when you pick an STT model in `mirai --setup`, Mirai **downloads the weights to** `~/.mirai/models/whisper` (or your chosen directory) so the first real voice message is not stuck waiting on the network.
+
+The setup wizard exposes only multilingual Whisper models: `tiny`, `base`, `small`, `medium`, `large`, and `turbo`. `base` is the recommended starter choice; `tiny` is lighter, while `small` and above trade more disk/CPU/GPU resources for better accuracy.
+
 ### Tool Routing
 
 | Variable | Description |
@@ -98,6 +117,7 @@ Telegram-related dependencies (`python-telegram-bot`, `httpx`) are included in t
    - Add `"telegram_bot_token": "..."` to `~/.mirai/config.json`
    - Run `mirai --server --telegram` or `mirai --telegram` without a token set -- Mirai will prompt you to paste it and saves it to `~/.mirai/config.json`
 3. Optionally restrict access: set `TELEGRAM_ALLOWED_USER_IDS` or add `"telegram_allowed_user_ids"` in config.
+4. To accept voice/audio messages, enable STT in `mirai --setup` (Whisper weights are downloaded during setup when you select a model).
 
 ### Running
 

@@ -120,6 +120,22 @@ def load_model_config() -> ModelConfig:
         except ValueError:
             pass
 
+    stt_provider = os.getenv("MIRAI_STT_PROVIDER")
+    if stt_provider:
+        config.stt_provider = stt_provider.strip() or config.stt_provider
+    stt_backend = os.getenv("MIRAI_STT_BACKEND")
+    if stt_backend:
+        config.stt_backend = stt_backend.strip() or config.stt_backend
+    stt_model = os.getenv("MIRAI_STT_MODEL")
+    if stt_model:
+        config.stt_model = stt_model.strip() or config.stt_model
+    stt_model_dir = os.getenv("MIRAI_STT_MODEL_DIR")
+    if stt_model_dir:
+        config.stt_model_dir = stt_model_dir.strip() or config.stt_model_dir
+    stt_language = os.getenv("MIRAI_STT_LANGUAGE")
+    if stt_language:
+        config.stt_language = stt_language.strip() or config.stt_language
+
     return config
 
 

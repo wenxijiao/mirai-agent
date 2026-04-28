@@ -1,6 +1,9 @@
 """Default model config values (no network, no server)."""
 
+import json
+
 from mirai.core.config import ModelConfig
+from mirai.core.config.store import load_model_config
 
 
 def test_model_config_default_provider():
@@ -11,3 +14,27 @@ def test_model_config_default_provider():
     assert cfg.chat_append_tool_use_instruction is True
     assert cfg.edge_tools_enable_dynamic_routing is True
     assert cfg.edge_tools_retrieval_limit == 20
+    assert cfg.stt_provider == "disabled"
+    assert cfg.stt_backend == "faster-whisper"
+    assert cfg.stt_model is None
+    assert cfg.stt_language == "auto"
+
+
+def test_model_config_stt_env_overrides(monkeypatch, tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"chat_model": "m"}), encoding="utf-8")
+    monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
+    monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
+    monkeypatch.setenv("MIRAI_STT_PROVIDER", "whisper")
+    monkeypatch.setenv("MIRAI_STT_BACKEND", "faster-whisper")
+    monkeypatch.setenv("MIRAI_STT_MODEL", "small")
+    monkeypatch.setenv("MIRAI_STT_MODEL_DIR", "/tmp/mirai-whisper")
+    monkeypatch.setenv("MIRAI_STT_LANGUAGE", "auto")
+
+    cfg = load_model_config()
+
+    assert cfg.stt_provider == "whisper"
+    assert cfg.stt_backend == "faster-whisper"
+    assert cfg.stt_model == "small"
+    assert cfg.stt_model_dir == "/tmp/mirai-whisper"
+    assert cfg.stt_language == "auto"

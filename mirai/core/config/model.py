@@ -41,7 +41,14 @@ class ModelConfig(BaseModel):
     line_channel_access_token: str | None = None
     line_bot_port: int = Field(default=8788, ge=1, le=65535)
     line_allowed_user_ids: list[str] = Field(default_factory=list)
+    # Speech-to-text (optional): disabled by default so text-only installs stay lightweight.
+    stt_provider: str = "disabled"
+    stt_backend: str = "faster-whisper"
+    stt_model: str | None = None
+    stt_model_dir: str | None = None
+    stt_language: str = "auto"
 
 
 RECOMMENDED_CHAT_MODEL = "qwen3.5:9b"
 RECOMMENDED_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+RECOMMENDED_STT_MODEL = "base"

@@ -96,6 +96,9 @@ def test_model_config_public_dict_includes_key_flags(monkeypatch, tmp_path: Path
     assert "openai_base_url" in d
     assert d["edge_tools_enable_dynamic_routing"] is True
     assert d["edge_tools_retrieval_limit"] == 20
+    assert d["stt_provider"] == "disabled"
+    assert d["stt_backend"] == "faster-whisper"
+    assert d["stt_model"] == ""
 
 
 def test_put_config_model_updates_edge_tool_routing_settings(monkeypatch, tmp_path: Path) -> None:

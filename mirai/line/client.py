@@ -34,7 +34,7 @@ def flex_message(alt_text: str, contents: dict[str, Any]) -> dict[str, Any]:
     raw = json.dumps(msg, ensure_ascii=False).encode("utf-8")
     if len(raw) <= _MAX_FLEX_BYTES:
         return msg
-    return text_message(alt_text[:400] + " (卡片过大，已改为纯文本)")
+    return text_message(alt_text[:400] + " (Flex payload too large; sent as plain text instead.)")
 
 
 def flex(alt_text: str, contents: dict[str, Any]) -> dict[str, Any]:

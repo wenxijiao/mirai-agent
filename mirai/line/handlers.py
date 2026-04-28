@@ -8,6 +8,7 @@ attach via the plugin system.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import uuid
@@ -63,12 +64,12 @@ from mirai.line.pending import (
 _LINE_TEXT_MAX = 5000
 
 _LINE_SYSTEM_HELP = (
-    "/system — 本会话系统提示词（仅当前 LINE 会话，非全局）\n\n"
-    "/system — 查看当前生效内容\n"
-    "/system set <文本…> — 设置本会话覆盖\n"
-    "/system reset — 清除覆盖，用服务器全局默认\n"
-    "/system help — 本说明\n\n"
-    "长文本建议改用 Web 或 API。"
+    "/system — Session system prompt (LINE session only; not global)\n\n"
+    "/system — or /system show — show the effective prompt\n"
+    "/system set <text> — set a session override\n"
+    "/system reset — clear override; use the server global default\n"
+    "/system help — this help\n\n"
+    "For long prompts, prefer the web UI or HTTP API."
 )
 
 
@@ -125,6 +126,40 @@ async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> 
         return True, ""
 
 
+async def _transcribe_audio_bytes(
+    line_user_id: str,
+    *,
+    session_id: str,
+    filename: str,
+    data: bytes,
+    use_http: bool,
+) -> str:
+    if use_http:
+        connection = chat_connection_config(line_user_id)
+        url = _api_url(connection, "/stt/transcribe")
+        headers = connection.auth_headers()
+        headers["Content-Type"] = "application/json"
+        timeout = httpx.Timeout(10.0, read=600.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                url,
+                headers=headers,
+                json={
+                    "session_id": session_id,
+                    "filename": filename,
+                    "content_base64": base64.standard_b64encode(data).decode("ascii"),
+                },
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(r.text[:500])
+            return str(r.json().get("text") or "").strip()
+
+    from mirai.core.stt import transcribe_audio
+
+    result = await transcribe_audio(data, filename=filename)
+    return result.text.strip()
+
+
 async def _line_system_command(
     line_user_id: str,
     client_session_id: str,
@@ -154,15 +189,15 @@ async def _line_system_command(
                 return err2
             if sp.get("is_custom") and sp.get("system_prompt"):
                 effective = str(sp["system_prompt"])
-                label = "本会话自定义"
+                label = "Session override"
             else:
                 effective = str(gp.get("system_prompt") or "")
-                label = "全局默认"
+                label = "Global default"
             return format_effective_prompt_reply(effective=effective, source_label=label)
 
         custom = get_session_prompt(sid)
         eff = get_effective_system_prompt(sid)
-        label = "本会话自定义" if custom else "全局默认"
+        label = "Session override" if custom else "Global default"
         return format_effective_prompt_reply(effective=eff, source_label=label)
 
     if verb == "reset":
@@ -173,13 +208,13 @@ async def _line_system_command(
             delete_session_prompt(sid)
             ok, err = True, ""
         if ok:
-            return "已清除本会话覆盖，将使用服务器全局系统提示词。"
-        return f"失败: {err}"
+            return "Session override cleared; using the global system prompt."
+        return f"Failed: {err}"
 
     if verb == "set":
         body = arg_rest.strip()
         if not body:
-            return "用法: /system set <提示词内容>"
+            return "Usage: /system set <prompt text>"
         if use_http:
             connection = chat_connection_config(line_user_id)
             ok, err = await http_put_session_prompt(connection, client_session_id, body)
@@ -187,10 +222,10 @@ async def _line_system_command(
             set_session_prompt(sid, body)
             ok, err = True, ""
         if ok:
-            return "已更新本会话系统提示词。"
-        return f"失败: {err}"
+            return "Session system prompt updated."
+        return f"Failed: {err}"
 
-    return "未知子命令。发送 /system help 查看说明。"
+    return "Unknown subcommand. Send /system help for usage."
 
 
 async def _stream_chat_http(line_user_id: str, prompt: str, session_id: str) -> AsyncIterator[dict[str, Any]]:
@@ -375,26 +410,26 @@ async def handle_line_message_event(
         lower = raw.lower()
         if lower in ("/help", "/start", "help"):
             await reply_text(
-                "Mirai LINE 桥接\n\n"
-                "发消息即可对话（支持图片/文件）。\n"
-                "命令：\n"
-                "/clear — 清除本会话\n"
-                "/model — 查看/切换模型\n"
-                "/system — 本会话系统提示词（见 /system help）\n"
-                "/help — 本说明"
+                "Mirai LINE bridge\n\n"
+                "Send a message to chat (images/files; voice when STT is enabled).\n"
+                "Commands:\n"
+                "/clear — clear this session\n"
+                "/model — view or switch model\n"
+                "/system — session system prompt (see /system help)\n"
+                "/help — this message"
             )
             return
         if lower.startswith("/clear"):
             ok, err = await _post_clear_session(connection, session_id)
             if ok:
-                await reply_text("会话已清除。")
+                await reply_text("Session cleared.")
             else:
-                await reply_text(f"清除失败: {err}")
+                await reply_text(f"Failed to clear session: {err}")
             return
         if lower.startswith("/model"):
             cfg = await _get_model_dict(user_id, use_http=use_http)
             if not cfg:
-                await reply_text("无法读取模型配置。")
+                await reply_text("Could not read model configuration.")
                 return
             pick_sid = uuid.uuid4().hex[:8]
             bubble = model_card(
@@ -452,9 +487,9 @@ async def handle_line_message_event(
                 dkey = decision_map.get(action, "deny")
                 ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
                 if not ok_c:
-                    await reply_text(f"确认失败: {err_c}", push=True)
+                    await reply_text(f"Confirmation failed: {err_c}", push=True)
             elif et == "error":
-                await reply_text(f"错误: {ev.get('content', 'Unknown')}", push=True)
+                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
 
         final_text = "".join(accumulated)
         msgs: list[dict[str, Any]] = []
@@ -464,12 +499,77 @@ async def handle_line_message_event(
             await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
         return
 
+    if mtype == "audio":
+        mid = msg.get("id")
+        if not mid:
+            await reply_text("Could not read this voice message.")
+            return
+        try:
+            await line_client.show_loading_animation(user_id, 20)
+        except Exception:
+            pass
+        try:
+            data = await line_client.get_message_content(str(mid))
+            if len(data) > MAX_UPLOAD_BYTES:
+                await reply_text(f"Audio too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).")
+                return
+            prompt = await _transcribe_audio_bytes(
+                user_id,
+                session_id=session_id,
+                filename=f"line_audio_{mid}.m4a",
+                data=data,
+                use_http=use_http,
+            )
+        except Exception as exc:
+            await reply_text(f"Voice transcription failed: {exc}")
+            return
+        if not prompt:
+            await reply_text("Transcription produced no text.")
+            return
+
+        accumulated: list[str] = []
+        async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
+            et = ev.get("type")
+            if et == "text":
+                accumulated.append(str(ev.get("content", "")))
+            elif et == "tool_confirmation":
+                call_id = str(ev.get("call_id", ""))
+                tool_name = str(ev.get("tool_name", ""))
+                args = ev.get("arguments") if isinstance(ev.get("arguments"), dict) else {}
+                short_id = uuid.uuid4().hex[:8]
+                fut = asyncio.get_running_loop().create_future()
+                PENDING_TOOL_CONFIRM[short_id] = fut
+                args_preview = json.dumps(args, ensure_ascii=False)[:800]
+                bubble = tool_confirm_card(tool_name, args_preview, short_id)
+                try:
+                    await line_client.push_message(user_id, [flex_message("Confirm", bubble)])
+                except Exception:
+                    pass
+                try:
+                    action = await asyncio.wait_for(fut, timeout=600.0)
+                except asyncio.TimeoutError:
+                    action = "deny"
+                finally:
+                    PENDING_TOOL_CONFIRM.pop(short_id, None)
+                decision_map = {"deny": "deny", "allow": "allow", "always": "always_allow"}
+                dkey = decision_map.get(action, "deny")
+                ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
+                if not ok_c:
+                    await reply_text(f"Confirmation failed: {err_c}", push=True)
+            elif et == "error":
+                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
+        final_text = "".join(accumulated)
+        if final_text:
+            msgs = [text_message(chunk) for chunk in _split_line_text(final_text)]
+            await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
+        return
+
     # Non-text: image / file
     if mtype in ("image", "file"):
         parts: list[str] = []
         ok_media = await _append_line_media_to_parts(msg, line_client, user_id, session_id, parts)
         if not ok_media or not parts:
-            await reply_text("无法处理该媒体。")
+            await reply_text("Could not process this media.")
             return
         prompt = "\n".join(parts)
         media_receipts: list[dict[str, Any]] = []
@@ -509,9 +609,9 @@ async def handle_line_message_event(
                 dkey = decision_map.get(action, "deny")
                 ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
                 if not ok_c:
-                    await reply_text(f"确认失败: {err_c}", push=True)
+                    await reply_text(f"Confirmation failed: {err_c}", push=True)
             elif et == "error":
-                await reply_text(f"错误: {ev.get('content', 'Unknown')}", push=True)
+                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
         final_text = "".join(accumulated)
         msgs: list[dict[str, Any]] = list(media_receipts)
         for chunk in _split_line_text(final_text) if final_text else []:
@@ -520,7 +620,7 @@ async def handle_line_message_event(
             await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
         return
 
-    await reply_text("暂不支持该消息类型（请发文本/图片/文件）。")
+    await reply_text("Unsupported message type (send text, image, file, or voice).")
 
 
 async def _append_line_media_to_parts(
@@ -542,7 +642,7 @@ async def _append_line_media_to_parts(
         return False
     if len(data) > MAX_UPLOAD_BYTES:
         parts.clear()
-        parts.append(f"文件过大（最大 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB）")
+        parts.append(f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
         return False
     if mtype == "image":
         name = f"line_image_{mid}.jpg"
@@ -587,12 +687,12 @@ async def handle_line_postback_event(
     if verb == "tool_confirm":
         fut = PENDING_TOOL_CONFIRM.get(short_id)
         if fut is None or fut.done():
-            await reply_text("确认已过期或已使用。")
+            await reply_text("Confirmation expired or already used.")
             return
         if arg not in ("deny", "allow", "always"):
             arg = "deny"
         fut.set_result(arg)
-        await reply_text("已记录选择。")
+        await reply_text("Choice recorded.")
         return
 
     if verb == "model_switch":
@@ -610,24 +710,24 @@ async def handle_line_postback_event(
         try:
             idx = int(arg)
         except ValueError:
-            await reply_text("无效选项。")
+            await reply_text("Invalid option.")
             return
         candidates = MODEL_PICK_SESSIONS.get(short_id) or []
         if idx < 0 or idx >= len(candidates):
-            await reply_text("无效模型索引。")
+            await reply_text("Invalid model index.")
             return
         model_name = candidates[idx]
         ok, err = await _apply_chat_model(user_id, model_name, use_http=use_http)
         if ok:
-            await reply_text(f"已切换 chat 模型为: {model_name}")
+            await reply_text(f"Switched chat model to: {model_name}")
         else:
-            await reply_text(f"切换失败: {err}")
+            await reply_text(f"Failed to switch model: {err}")
         return
 
     if verb == "timer_snooze":
         ctx = TIMER_CARD_CTX.get(short_id)
         if not ctx:
-            await reply_text("定时器上下文已过期。")
+            await reply_text("Timer context expired.")
             return
         try:
             delay = int(arg)
@@ -641,13 +741,13 @@ async def handle_line_postback_event(
             str(ctx.get("description", "")),
             str(ctx.get("qualified_session_id", ctx.get("session_id", ""))),
         )
-        await reply_text(f"已延后约 {max(1, delay // 60)} 分钟。")
+        await reply_text(f"Snoozed for about {max(1, delay // 60)} minutes.")
         return
 
     if verb == "timer_rerun":
         ctx = TIMER_CARD_CTX.get(short_id)
         if not ctx:
-            await reply_text("定时器上下文已过期。")
+            await reply_text("Timer context expired.")
             return
         client_sid = str(ctx.get("client_session_id", line_session_client_id(user_id)))
         description = str(ctx.get("description", ""))
@@ -714,7 +814,7 @@ async def dispatch_line_webhook(
                     try:
                         await line_client.reply_message(
                             reply_tok or "",
-                            [text_message("Mirai LINE 已就绪。发 /help 查看命令。")],
+                            [text_message("Mirai LINE is ready. Send /help for commands.")],
                         )
                     except Exception:
                         pass

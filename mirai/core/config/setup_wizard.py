@@ -11,6 +11,7 @@ from mirai.core.config.credentials import (
 from mirai.core.config.model import (
     RECOMMENDED_CHAT_MODEL,
     RECOMMENDED_EMBEDDING_MODEL,
+    RECOMMENDED_STT_MODEL,
     ModelConfig,
 )
 from mirai.core.config.paths import CONFIG_PATH
@@ -174,6 +175,87 @@ def _prompt_model_name(provider_name: str, label: str) -> str:
         print("  Model name cannot be empty.")
 
 
+_WHISPER_MODELS = ("tiny", "base", "small", "medium", "large", "turbo")
+
+
+def _prompt_stt_config(config: ModelConfig) -> None:
+    """Ask for optional local STT settings and mutate *config*."""
+    print()
+    print("Configure speech-to-text (STT) for voice messages?")
+    print("  1. Skip / disable STT")
+    print(f"  2. Use local Whisper multilingual model (recommended: {RECOMMENDED_STT_MODEL})")
+    print("  3. Keep existing STT settings")
+
+    while True:
+        choice = input("> ").strip()
+        if choice == "1":
+            config.stt_provider = "disabled"
+            config.stt_backend = "faster-whisper"
+            config.stt_model = None
+            config.stt_language = "auto"
+            print("  STT disabled. You can enable it later with `mirai --setup`.")
+            return
+        if choice == "3":
+            print(f"  Keeping STT: {config.stt_provider} / {config.stt_model or 'unset'}")
+            return
+        if choice == "2":
+            break
+        print("Please choose one of the listed options.")
+
+    print()
+    print("Choose a Whisper multilingual model:")
+    hints = {
+        "tiny": "lightest, fastest, lower accuracy",
+        "base": "recommended starter balance",
+        "small": "better accuracy, slower on low-end CPU",
+        "medium": "heavy; use on stronger hardware",
+        "large": "very heavy; not recommended for first setup",
+        "turbo": "fast for its size, still heavier than small",
+    }
+    for i, name in enumerate(_WHISPER_MODELS, 1):
+        default = " (default)" if name == RECOMMENDED_STT_MODEL else ""
+        print(f"  {i}. {name}{default} — {hints[name]}")
+
+    while True:
+        selected = input("> ").strip()
+        if not selected:
+            model = RECOMMENDED_STT_MODEL
+            break
+        try:
+            idx = int(selected)
+        except ValueError:
+            print("Please enter a valid number.")
+            continue
+        if 1 <= idx <= len(_WHISPER_MODELS):
+            model = _WHISPER_MODELS[idx - 1]
+            break
+        print("That selection is out of range.")
+
+    model_dir = input("  Model cache directory (Enter for ~/.mirai/models/whisper): ").strip()
+    config.stt_provider = "whisper"
+    config.stt_backend = "faster-whisper"
+    config.stt_model = model
+    config.stt_model_dir = model_dir or None
+    config.stt_language = "auto"
+    print()
+    print(
+        "  Optional: put HF_TOKEN in ~/.mirai/.env for Hugging Face rate limits "
+        "(see docs/CONFIGURATION.md)."
+    )
+    print(
+        "  Downloading Whisper weights (Hugging Face progress bar; first install can take several minutes)..."
+    )
+    try:
+        from mirai.core.stt.whisper_provider import ensure_whisper_weights_cached
+
+        ensure_whisper_weights_cached(model=model, model_dir=config.stt_model_dir)
+    except Exception as exc:
+        print(f"  Warning: could not pre-download Whisper weights: {exc}")
+        print("  Voice transcription will retry the download on first use.")
+    else:
+        print("  Whisper model files are ready.")
+
+
 def run_model_setup(force: bool = False) -> ModelConfig:
     current = load_saved_model_config()
     if current.chat_model and not force:
@@ -211,10 +293,12 @@ def run_model_setup(force: bool = False) -> ModelConfig:
     config.embedding_provider = embedding_provider
     config.embedding_model = embedding_model
     config.system_prompt = current.system_prompt
+    _prompt_stt_config(config)
     save_model_config(config)
 
     print()
     print(f"Saved Mirai model config to {CONFIG_PATH}.")
     print(f"Chat: {config.chat_provider} / {config.chat_model}")
     print(f"Embedding: {config.embedding_provider} / {config.embedding_model}")
+    print(f"STT: {config.stt_provider} / {config.stt_model or 'disabled'}")
     return config

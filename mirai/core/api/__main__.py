@@ -2,6 +2,10 @@
 
 import logging
 
+from mirai.core.env_load import load_mirai_dotenv
+
+load_mirai_dotenv()
+
 import uvicorn
 from mirai.core.api.routes import app
 

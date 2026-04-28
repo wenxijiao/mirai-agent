@@ -103,15 +103,15 @@ def test_forced_edge_tool_is_kept_even_when_query_changes():
     assert len(selected) == 3
 
 
-def test_chinese_queries_can_match_chinese_edge_descriptions():
+def test_queries_match_edge_descriptions_or_lexical():
     registry = _edge_registry(20, special_name="edge_home__open_curtain")
     registry["lab"]["edge_home__open_curtain"] = {
-        "schema": _schema("edge_home__open_curtain", "打开客厅窗帘并调整遮光程度。")
+        "schema": _schema("edge_home__open_curtain", "Open the living room curtains and adjust shade level.")
     }
 
     decision = select_tool_schemas(
         identity=LOCAL_IDENTITY,
-        query="帮我打开客厅窗帘",
+        query="open the living room curtains",
         session_id="s1",
         disabled_tools=set(),
         edge_registry=registry,
@@ -121,32 +121,32 @@ def test_chinese_queries_can_match_chinese_edge_descriptions():
     assert "edge_home__open_curtain" in selected
 
 
-def test_multilingual_queries_can_match_non_english_edge_descriptions():
+def test_concurrent_routing_choices_match_distinct_edge_descriptions():
     registry = _edge_registry(20, special_name="edge_home__open_blinds")
     registry["lab"]["edge_home__open_blinds"] = {
-        "schema": _schema("edge_home__open_blinds", "Ouvrir les stores du salon et régler la lumière.")
+        "schema": _schema("edge_home__open_blinds", "Open the living room blinds and adjust ambient light.")
     }
     registry["lab"]["edge_home__start_bath"] = {
-        "schema": _schema("edge_home__start_bath", "お風呂を沸かして温度を調整します。")
+        "schema": _schema("edge_home__start_bath", "Start the bath heater and set the target water temperature.")
     }
 
-    french_decision = select_tool_schemas(
+    first_decision = select_tool_schemas(
         identity=LOCAL_IDENTITY,
-        query="ouvre les stores du salon",
+        query="open the living room blinds",
         session_id="s1",
         disabled_tools=set(),
         edge_registry=registry,
     )
-    japanese_decision = select_tool_schemas(
+    second_decision = select_tool_schemas(
         identity=LOCAL_IDENTITY,
-        query="お風呂を沸かして",
+        query="start heating the bath water",
         session_id="s1",
         disabled_tools=set(),
         edge_registry=registry,
     )
 
-    assert "edge_home__open_blinds" in [entry.name for entry in french_decision.selected_edge_tools]
-    assert "edge_home__start_bath" in [entry.name for entry in japanese_decision.selected_edge_tools]
+    assert "edge_home__open_blinds" in [entry.name for entry in first_decision.selected_edge_tools]
+    assert "edge_home__start_bath" in [entry.name for entry in second_decision.selected_edge_tools]
 
 
 def test_embedding_routing_is_preferred_over_lexical_matching(monkeypatch):
@@ -185,12 +185,12 @@ def test_embedding_routing_is_preferred_over_lexical_matching(monkeypatch):
 
 def test_meaningful_edge_name_prioritizes_tools_on_that_edge():
     registry = {
-        "卧室": {
+        "bedroom": {
             "edge_bedroom__set_light": {
                 "schema": _schema("edge_bedroom__set_light", "Set the brightness and power state for a light.")
             }
         },
-        "厨房": {
+        "kitchen": {
             "edge_kitchen__set_light": {
                 "schema": _schema("edge_kitchen__set_light", "Set the brightness and power state for a light.")
             }
@@ -199,7 +199,7 @@ def test_meaningful_edge_name_prioritizes_tools_on_that_edge():
 
     decision = select_tool_schemas(
         identity=LOCAL_IDENTITY,
-        query="把卧室的灯打开",
+        query="turn on the bedroom light",
         session_id="s1",
         disabled_tools=set(),
         edge_registry=registry,

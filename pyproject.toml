@@ -43,6 +43,7 @@ dependencies = [
     "httpx>=0.27",
     "python-telegram-bot>=21.0",
     "cryptography>=42.0",
+    "faster-whisper>=1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -72,6 +73,10 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.8.0",
     "pyright>=1.1",
+]
+# Back-compat: STT uses faster-whisper from the main dependency set; this extra is a no-op pin.
+stt = [
+    "faster-whisper>=1.0",
 ]
 
 [tool.ruff]

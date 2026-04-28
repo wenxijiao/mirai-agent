@@ -73,4 +73,4 @@ def truncate_for_bot_display(text: str, max_chars: int = 3000) -> str:
 
 
 def format_effective_prompt_reply(*, effective: str, source_label: str) -> str:
-    return f"当前系统提示词（{source_label}）：\n\n{truncate_for_bot_display(effective)}"
+    return f"Current system prompt ({source_label}):\n\n{truncate_for_bot_display(effective)}"

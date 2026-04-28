@@ -34,6 +34,7 @@ from pydantic import BaseModel
 logger = get_logger(__name__)
 
 _MAX_CHAT_UPLOAD_BYTES = 25 * 1024 * 1024
+_AUDIO_UPLOAD_EXTENSIONS = frozenset({".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".webm"})
 
 
 def _format_http_error_detail(body: dict) -> str:
@@ -704,9 +705,33 @@ class State(rx.State):
             except Exception as exc:
                 return False, "", str(exc), False
 
+        def _post_audio_transcribe(filename: str, b64: str) -> tuple[bool, str, str]:
+            try:
+                r = requests.post(
+                    self._api("/stt/transcribe"),
+                    json={
+                        "session_id": self.session_id,
+                        "filename": filename,
+                        "content_base64": b64,
+                    },
+                    headers=self._headers(),
+                    timeout=600,
+                )
+                try:
+                    body = r.json()
+                except Exception:
+                    body = {}
+                if not r.ok:
+                    detail = _format_http_error_detail(body) if isinstance(body, dict) else ""
+                    return False, "", detail or r.text or str(r.status_code)
+                return True, str(body.get("text") or "").strip(), ""
+            except Exception as exc:
+                return False, "", str(exc)
+
         saved_paths: list[str] = []
         image_paths: list[str] = []
         doc_paths: list[str] = []
+        transcribed_audio: list[str] = []
         for uf in files:
             try:
                 raw = await uf.read()
@@ -720,6 +745,15 @@ class State(rx.State):
                 return
             name = uf.filename or "upload.bin"
             b64 = base64.standard_b64encode(raw).decode("ascii")
+            if Path(name).suffix.lower() in _AUDIO_UPLOAD_EXTENSIONS:
+                ok_t, text, err_t = await asyncio.to_thread(_post_audio_transcribe, name, b64)
+                if not ok_t:
+                    self.error_message = f"Audio transcription failed: {err_t}"
+                    self.upload_notice = ""
+                    return
+                if text:
+                    transcribed_audio.append(text)
+                continue
             ok, path, err, is_image = await asyncio.to_thread(_post_upload, name, b64)
             if not ok:
                 self.error_message = f"Upload failed: {err}"
@@ -732,13 +766,24 @@ class State(rx.State):
                 else:
                     doc_paths.append(path)
 
+        if transcribed_audio:
+            merged = "\n\n".join(transcribed_audio)
+            self.draft = f"{self.draft.rstrip()}\n\n{merged}".strip() if self.draft.strip() else merged
+
         if not saved_paths:
+            if transcribed_audio:
+                self.error_message = ""
+                self.upload_notice = "Audio transcribed into the message draft."
+                yield rx.call_script(CHAT_INPUT_RESIZE_FOCUS_JS)
+                yield rx.clear_selected_files("mirai_chat_upload")
+                yield rx.clear_selected_files("mirai_chat_drop")
+                return
             self.error_message = "Upload did not return a file path."
             self.upload_notice = ""
             return
 
         self.error_message = ""
-        self.upload_notice = ""
+        self.upload_notice = "Audio transcribed into the draft." if transcribed_audio else ""
 
         new_files: list[PendingFile] = []
         for p, is_img in zip(saved_paths, [p in image_paths for p in saved_paths]):
@@ -2340,7 +2385,7 @@ def _chat_input() -> rx.Component:
                                 min_height="0",
                                 on_drop=State.handle_chat_file_upload,
                             ),
-                            content="Upload files (images, PDF, Word, text, etc.)",
+                            content="Upload files or audio (images, PDF, Word, text, etc.)",
                         ),
                         rx.tooltip(
                             rx.box(

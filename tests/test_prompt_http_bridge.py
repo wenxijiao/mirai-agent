@@ -12,6 +12,6 @@ def test_truncate_for_bot_display() -> None:
 
 
 def test_format_effective_prompt_reply() -> None:
-    text = format_effective_prompt_reply(effective="hi", source_label="全局默认")
-    assert "全局默认" in text
+    text = format_effective_prompt_reply(effective="hi", source_label="Global default")
+    assert "Global default" in text
     assert "hi" in text

@@ -9,16 +9,13 @@ from typing import Any
 from mirai.core.memories.constants import MIRAI_V1_TOOL_CALLS, MIRAI_V1_TOOL_RESULT
 
 _PREFERENCE_PATTERNS = (
-    re.compile(r"(以后|今后|总是|默认|请记住|记住).{0,80}", re.IGNORECASE),
     re.compile(r"\b(always|prefer|remember that|from now on|by default)\b.{0,120}", re.IGNORECASE),
 )
 _FACT_PATTERNS = (
-    re.compile(r"(这个项目|本项目|项目).{0,120}(使用|基于|是|叫|依赖|采用).{0,160}", re.IGNORECASE),
     re.compile(r"\b(this project|the project|we use|it uses|is built with)\b.{0,180}", re.IGNORECASE),
 )
 _DECISION_PATTERNS = (
-    re.compile(r"(决定|确定|结论|方案是).{0,160}", re.IGNORECASE),
-    re.compile(r"\b(decided|decision|we will|the plan is)\b.{0,180}", re.IGNORECASE),
+    re.compile(r"\b(decided|decision|we will|the plan is|conclusion)\b.{0,180}", re.IGNORECASE),
 )
 
 
@@ -96,7 +93,7 @@ class MemoryWriter:
 
 
 def _trim_match(text: str) -> str:
-    return " ".join(text.strip(" \n\t:：。.!").split())
+    return " ".join(text.strip(" \n\t:.!").split())
 
 
 def _summarize_text(text: str, max_len: int = 1000) -> str:
@@ -120,4 +117,4 @@ def _compact_json(value: Any, max_len: int = 500) -> str:
 
 def _looks_like_failure(text: str) -> bool:
     lowered = str(text or "").lower()
-    return any(marker in lowered for marker in ("error", "exception", "failed", "traceback", "失败", "错误"))
+    return any(marker in lowered for marker in ("error", "exception", "failed", "traceback"))

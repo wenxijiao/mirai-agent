@@ -19,6 +19,15 @@ class FileUploadRequest(BaseModel):
     content_base64: str
 
 
+class TranscribeRequest(BaseModel):
+    """JSON body for ``POST /stt/transcribe`` (base64 audio)."""
+
+    session_id: str = "default"
+    filename: str
+    content_base64: str
+    language: str | None = None
+
+
 class SystemPromptUpdateRequest(BaseModel):
     system_prompt: str
 
@@ -71,6 +80,11 @@ class ModelConfigUpdateRequest(BaseModel):
     chat_append_tool_use_instruction: bool | None = None
     edge_tools_enable_dynamic_routing: bool | None = None
     edge_tools_retrieval_limit: int | None = Field(default=None, ge=0, le=200)
+    stt_provider: str | None = None
+    stt_backend: str | None = None
+    stt_model: str | None = None
+    stt_model_dir: str | None = None
+    stt_language: str | None = None
     # Stored in ~/.mirai/config.json; omit or leave empty to keep existing value.
     openai_api_key: str | None = None
     gemini_api_key: str | None = None

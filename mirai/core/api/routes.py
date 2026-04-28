@@ -48,6 +48,7 @@ from mirai.core.api.schemas import (
     ToolConfirmationResponse,
     ToolConfirmationToggleRequest,
     ToolToggleRequest,
+    TranscribeRequest,
     UIPreferencesRequest,
 )
 from mirai.core.api.state import (
@@ -278,6 +279,28 @@ async def uploads_endpoint(identity: CurrentIdentity, request: FileUploadRequest
         raw,
         owner_user_id=identity.user_id if identity.user_id != "_local" else None,
     )
+
+
+@app.post("/stt/transcribe")
+async def stt_transcribe_endpoint(identity: CurrentIdentity, request: TranscribeRequest):
+    """Transcribe audio bytes for chat clients before they call ``/chat``."""
+    _ = get_session_scope().qualify_session_http(identity, request.session_id)
+    raw = decode_upload_payload(request.content_base64)
+    try:
+        from mirai.core.stt import SttError, SttNotConfiguredError, transcribe_audio
+
+        result = await transcribe_audio(raw, filename=request.filename, language=request.language)
+    except SttNotConfiguredError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SttError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not result.text:
+        raise HTTPException(status_code=422, detail="No speech could be transcribed from the audio.")
+    return {
+        "text": result.text,
+        "language": result.language,
+        "duration_seconds": result.duration_seconds,
+    }
 
 
 @app.get("/config/system-prompt")
@@ -561,6 +584,11 @@ def _model_config_public_dict() -> dict:
         "chat_append_tool_use_instruction": runtime.chat_append_tool_use_instruction,
         "edge_tools_enable_dynamic_routing": runtime.edge_tools_enable_dynamic_routing,
         "edge_tools_retrieval_limit": runtime.edge_tools_retrieval_limit,
+        "stt_provider": runtime.stt_provider,
+        "stt_backend": runtime.stt_backend,
+        "stt_model": runtime.stt_model or "",
+        "stt_model_dir": runtime.stt_model_dir or "",
+        "stt_language": runtime.stt_language,
         "openai_api_key_saved": bool(saved.openai_api_key and str(saved.openai_api_key).strip()),
         "gemini_api_key_saved": bool(saved.gemini_api_key and str(saved.gemini_api_key).strip()),
         "claude_api_key_saved": bool(saved.claude_api_key and str(saved.claude_api_key).strip()),
@@ -582,6 +610,18 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         raise unknown_provider_http(role="chat", name=request.chat_provider, supported=SUPPORTED_PROVIDERS)
     if request.embedding_provider and request.embedding_provider not in SUPPORTED_PROVIDERS:
         raise unknown_provider_http(role="embedding", name=request.embedding_provider, supported=SUPPORTED_PROVIDERS)
+    if request.stt_provider and request.stt_provider not in ("disabled", "whisper"):
+        raise HTTPException(status_code=400, detail="Unsupported STT provider. Use 'disabled' or 'whisper'.")
+    if request.stt_backend and request.stt_backend != "faster-whisper":
+        raise HTTPException(status_code=400, detail="Unsupported STT backend. Use 'faster-whisper'.")
+    if request.stt_model:
+        from mirai.core.stt import WHISPER_MULTILINGUAL_MODELS
+
+        if request.stt_model not in WHISPER_MULTILINGUAL_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported Whisper model. Use one of: {', '.join(WHISPER_MULTILINGUAL_MODELS)}.",
+            )
 
     backup_before = CONFIG_PATH.read_text(encoding="utf-8") if CONFIG_PATH.exists() else None
 
@@ -610,6 +650,18 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         config.edge_tools_enable_dynamic_routing = request.edge_tools_enable_dynamic_routing
     if request.edge_tools_retrieval_limit is not None:
         config.edge_tools_retrieval_limit = request.edge_tools_retrieval_limit
+    if request.stt_provider is not None:
+        config.stt_provider = request.stt_provider.strip() or "disabled"
+    if request.stt_backend is not None:
+        config.stt_backend = request.stt_backend.strip() or "faster-whisper"
+    if request.stt_model is not None:
+        v = request.stt_model.strip()
+        config.stt_model = v if v else None
+    if request.stt_model_dir is not None:
+        v = request.stt_model_dir.strip()
+        config.stt_model_dir = v if v else None
+    if request.stt_language is not None:
+        config.stt_language = request.stt_language.strip() or "auto"
     if request.openai_api_key is not None and request.openai_api_key.strip():
         config.openai_api_key = request.openai_api_key.strip()
         keys_or_base_changed = True

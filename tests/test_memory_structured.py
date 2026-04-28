@@ -10,11 +10,11 @@ from mirai.core.memories.memory import Memory
 def test_message_write_extracts_long_term_preference():
     with tempfile.TemporaryDirectory() as td:
         m = Memory(session_id="s_pref", storage_dir=td, max_recent=20)
-        m.add_message("user", "请记住以后都用中文简体回答我")
+        m.add_message("user", "Please remember that from now on you should answer in concise English.")
 
         memories = m.list_long_term_memories(kind="preference", session_id="s_pref")
         assert len(memories) == 1
-        assert "中文简体" in memories[0]["content"]
+        assert "concise English" in memories[0]["content"]
         assert memories[0]["source_message_ids"]
 
 
@@ -43,7 +43,7 @@ def test_tool_turn_writes_observation_and_context_retrieves_it():
         assert observations[0]["tool_name"] == "read_file"
         assert "local-first" in observations[0]["result_summary"]
 
-        ctx = m.get_context(query="之前 read_file 工具读到了什么？")
+        ctx = m.get_context(query="What did the read_file tool return?")
         structured = [msg for msg in ctx if msg["role"] == "system" and "Structured memory" in msg["content"]]
         assert structured
         assert "read_file" in structured[0]["content"]
@@ -52,21 +52,23 @@ def test_tool_turn_writes_observation_and_context_retrieves_it():
 def test_session_summary_is_included_before_recent_messages():
     with tempfile.TemporaryDirectory() as td:
         m = Memory(session_id="s_summary", storage_dir=td, max_recent=20)
-        m.update_session_summary("用户正在重构 Mirai memory 子系统。")
-        m.add_message("user", "下一步做什么？")
+        m.update_session_summary("The user is refactoring the Mirai memory subsystem.")
+        m.add_message("user", "What should we do next?")
 
-        ctx = m.get_context(query="继续")
+        ctx = m.get_context(query="continue")
         contents = [msg["content"] for msg in ctx if msg["role"] == "system"]
         assert any("Current session summary" in content for content in contents)
-        assert any("重构 Mirai memory" in content for content in contents)
+        assert any("refactoring the Mirai memory" in content for content in contents)
 
 
 def test_hybrid_structured_retrieval_falls_back_to_keyword():
     with tempfile.TemporaryDirectory() as td:
         m = Memory(session_id="s_hybrid", storage_dir=td, max_recent=20)
-        m.create_long_term_memory(kind="fact", content="这个项目使用 LanceDB 存储 memory", session_id="s_hybrid")
+        m.create_long_term_memory(
+            kind="fact", content="This project stores memory in LanceDB.", session_id="s_hybrid"
+        )
 
-        ctx = m.get_context(query="LanceDB memory 怎么存？")
+        ctx = m.get_context(query="How is LanceDB memory stored?")
         structured = [msg for msg in ctx if msg["role"] == "system" and "Structured memory" in msg["content"]]
         assert structured
         assert "LanceDB" in structured[0]["content"]

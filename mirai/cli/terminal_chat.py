@@ -1,8 +1,10 @@
+import base64
 import json
 import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import requests
 
@@ -55,6 +57,7 @@ Available commands:
   /prompt global set <text>  Set the global default prompt
   /prompt global reset  Reset global prompt to built-in default
   /model                Show current model configuration
+  /transcribe <path>    Transcribe an audio file and send it as a message
   /session              Show current session ID
   /clear                Clear chat history for this session
 """
@@ -113,6 +116,38 @@ def _handle_slash_command(user_input: str, session_id: str) -> bool:
                 print(f"  Failed: {r.text}\n")
         except Exception as exc:
             print(f"  Error: {exc}\n")
+        return True
+
+    if cmd == "/transcribe":
+        path_text = stripped[len("/transcribe") :].strip()
+        if not path_text:
+            print("  Usage: /transcribe <audio-file-path>\n")
+            return True
+        p = Path(path_text).expanduser()
+        if not p.is_file():
+            print(f"  Audio file not found: {p}\n")
+            return True
+        try:
+            raw = p.read_bytes()
+            b64 = base64.standard_b64encode(raw).decode("ascii")
+            r = requests.post(
+                _api_url(connection, "/stt/transcribe"),
+                json={"session_id": session_id, "filename": p.name, "content_base64": b64},
+                headers=headers,
+                timeout=600,
+            )
+            if not r.ok:
+                print(f"  Transcription failed: {r.text}\n")
+                return True
+            text = str(r.json().get("text") or "").strip()
+        except Exception as exc:
+            print(f"  Transcription failed: {exc}\n")
+            return True
+        if not text:
+            print("  Transcription returned empty text.\n")
+            return True
+        print(f"  Transcribed: {text}\n")
+        chat_stream(text, session_id=session_id)
         return True
 
     if cmd == "/prompt":
