@@ -457,9 +457,7 @@ def select_tool_schemas(
     elif len(edge_entries) <= edge_limit:
         selected_edge = edge_entries
     else:
-        forced = [
-            entry for entry in edge_entries if entry.name in forced_names and entry.name not in always_names
-        ]
+        forced = [entry for entry in edge_entries if entry.name in forced_names and entry.name not in always_names]
         base = _dedupe_entries(always_entries + forced)
         base_name_set = {entry.name for entry in base}
         remaining = [entry for entry in edge_entries if entry.name not in base_name_set]

@@ -238,13 +238,8 @@ def _prompt_stt_config(config: ModelConfig) -> None:
     config.stt_model_dir = model_dir or None
     config.stt_language = "auto"
     print()
-    print(
-        "  Optional: put HF_TOKEN in ~/.mirai/.env for Hugging Face rate limits "
-        "(see docs/CONFIGURATION.md)."
-    )
-    print(
-        "  Downloading Whisper weights (Hugging Face progress bar; first install can take several minutes)..."
-    )
+    print("  Optional: put HF_TOKEN in ~/.mirai/.env for Hugging Face rate limits (see docs/CONFIGURATION.md).")
+    print("  Downloading Whisper weights (Hugging Face progress bar; first install can take several minutes)...")
     try:
         from mirai.core.stt.whisper_provider import ensure_whisper_weights_cached
 

@@ -59,15 +59,12 @@ def ensure_whisper_weights_cached(*, model: str, model_dir: str | None = None) -
         from huggingface_hub import get_token, snapshot_download
         from tqdm.auto import tqdm
     except ImportError as exc:
-        raise RuntimeError(
-            "faster-whisper is required for STT. Reinstall: pip install --upgrade mirai-agent"
-        ) from exc
+        raise RuntimeError("faster-whisper is required for STT. Reinstall: pip install --upgrade mirai-agent") from exc
     fw_id = _FASTER_WHISPER_MODEL_IDS.get(model_name, model_name)
     repo_id = _FASTER_WHISPER_REPO_IDS.get(model_name)
     if not repo_id:
         raise ValueError(
-            f"Internal error: no Hugging Face repo for Whisper model {model_name!r}. "
-            f"Update mirai for this STT size."
+            f"Internal error: no Hugging Face repo for Whisper model {model_name!r}. Update mirai for this STT size."
         )
     hf_token = get_token()
     snapshot_download(
@@ -107,9 +104,7 @@ class WhisperSttProvider(SpeechToTextProvider):
             from faster_whisper import WhisperModel
             from huggingface_hub import get_token
         except ImportError as exc:
-            raise SttError(
-                "faster-whisper is not importable. Reinstall: pip install --upgrade mirai-agent"
-            ) from exc
+            raise SttError("faster-whisper is not importable. Reinstall: pip install --upgrade mirai-agent") from exc
         self.model_dir.mkdir(parents=True, exist_ok=True)
         try:
             hf_token = get_token()

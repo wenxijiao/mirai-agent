@@ -8,15 +8,9 @@ from typing import Any
 
 from mirai.core.memories.constants import MIRAI_V1_TOOL_CALLS, MIRAI_V1_TOOL_RESULT
 
-_PREFERENCE_PATTERNS = (
-    re.compile(r"\b(always|prefer|remember that|from now on|by default)\b.{0,120}", re.IGNORECASE),
-)
-_FACT_PATTERNS = (
-    re.compile(r"\b(this project|the project|we use|it uses|is built with)\b.{0,180}", re.IGNORECASE),
-)
-_DECISION_PATTERNS = (
-    re.compile(r"\b(decided|decision|we will|the plan is|conclusion)\b.{0,180}", re.IGNORECASE),
-)
+_PREFERENCE_PATTERNS = (re.compile(r"\b(always|prefer|remember that|from now on|by default)\b.{0,120}", re.IGNORECASE),)
+_FACT_PATTERNS = (re.compile(r"\b(this project|the project|we use|it uses|is built with)\b.{0,180}", re.IGNORECASE),)
+_DECISION_PATTERNS = (re.compile(r"\b(decided|decision|we will|the plan is|conclusion)\b.{0,180}", re.IGNORECASE),)
 
 
 class MemoryWriter:

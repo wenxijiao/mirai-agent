@@ -414,7 +414,8 @@ def build_application():
         if not voice and not audio:
             return True
         media = voice or audio
-        if getattr(media, "file_size", None) and media.file_size > MAX_UPLOAD_BYTES:
+        audio_bytes = getattr(media, "file_size", None)
+        if audio_bytes is not None and audio_bytes > MAX_UPLOAD_BYTES:
             await msg.reply_text(f"Audio too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).")
             return False
         try:

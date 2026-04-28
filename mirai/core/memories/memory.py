@@ -675,7 +675,7 @@ class Memory:
                     if row["id"] in snapshot_ids:
                         continue
                     vec = row.get("vector")
-                    if hasattr(vec, "tolist"):
+                    if vec is not None and hasattr(vec, "tolist"):
                         vec = vec.tolist()
                     if vec and any(v != 0.0 for v in vec):
                         continue

@@ -64,9 +64,7 @@ def test_session_summary_is_included_before_recent_messages():
 def test_hybrid_structured_retrieval_falls_back_to_keyword():
     with tempfile.TemporaryDirectory() as td:
         m = Memory(session_id="s_hybrid", storage_dir=td, max_recent=20)
-        m.create_long_term_memory(
-            kind="fact", content="This project stores memory in LanceDB.", session_id="s_hybrid"
-        )
+        m.create_long_term_memory(kind="fact", content="This project stores memory in LanceDB.", session_id="s_hybrid")
 
         ctx = m.get_context(query="How is LanceDB memory stored?")
         structured = [msg for msg in ctx if msg["role"] == "system" and "Structured memory" in msg["content"]]
