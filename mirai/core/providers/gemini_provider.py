@@ -41,6 +41,17 @@ def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[
                 out.append(m)
                 i += 1
                 continue
+            if any(not _gemini_tool_call_signature(tc) for tc in tcalls):
+                # Gemini 3 requires functionCall history parts to carry the
+                # thought_signature returned by the original model turn. Older
+                # persisted rows (or rows produced by another provider) do not
+                # have that opaque token, so replaying them produces a 400.
+                dropped_blocks += 1
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    j += 1
+                i = j
+                continue
             j = i + 1
             tools: list[dict[str, Any]] = []
             while j < len(messages) and messages[j].get("role") == "tool" and len(tools) < n:
@@ -76,6 +87,28 @@ def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[
             dropped_blocks,
         )
     return out
+
+
+def _gemini_tool_call_signature(tc: Any) -> str:
+    """Return the base64 Gemini thought signature stored on a tool call."""
+    if not isinstance(tc, dict):
+        return ""
+    value = tc.get("thought_signature") or tc.get("thoughtSignature")
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _decode_gemini_thought_signature(value: str) -> bytes | None:
+    """Decode the opaque Gemini thought signature stored as base64 text."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return base64.b64decode(raw)
+    except Exception:
+        _logger.debug("Gemini: ignoring invalid thought_signature on persisted tool call")
+        return None
 
 
 def _merge_consecutive_gemini_contents(contents: list[Any]) -> list[Any]:
@@ -271,12 +304,14 @@ class GeminiProvider(BaseLLMProvider):
                             args = json.loads(args)
                         except (json.JSONDecodeError, TypeError):
                             args = {}
+                    signature = _decode_gemini_thought_signature(_gemini_tool_call_signature(tc))
                     parts.append(
                         types.Part(
                             function_call=types.FunctionCall(
                                 name=fn.get("name", ""),
                                 args=args,
-                            )
+                            ),
+                            thought_signature=signature,
                         )
                     )
                 contents.append(types.Content(role="model", parts=parts))
@@ -340,7 +375,11 @@ class GeminiProvider(BaseLLMProvider):
                 if part.function_call:
                     fc = part.function_call
                     args = dict(fc.args) if fc.args else {}
-                    collected_tool_calls.append({"function": {"name": fc.name, "arguments": args}})
+                    call: dict[str, Any] = {"function": {"name": fc.name, "arguments": args}}
+                    signature = getattr(part, "thought_signature", None)
+                    if signature:
+                        call["thought_signature"] = base64.b64encode(signature).decode("ascii")
+                    collected_tool_calls.append(call)
                 elif part.text:
                     yield {"type": "text", "content": part.text}
 

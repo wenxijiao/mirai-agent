@@ -1,6 +1,12 @@
 """_sanitize_gemini_tool_sequence must drop orphan tool rows (Gemini 400 on bad ordering)."""
 
-from mirai.core.providers.gemini_provider import _sanitize_gemini_tool_sequence
+import base64
+
+from mirai.core.providers.gemini_provider import GeminiProvider, _sanitize_gemini_tool_sequence
+from mirai.core.tool_call_normalize import normalize_tool_calls
+
+
+_SIG = base64.b64encode(b"gemini-thought-signature").decode("ascii")
 
 
 def test_drops_tool_rows_after_system_when_window_starts_mid_turn():
@@ -20,7 +26,7 @@ def test_keeps_paired_assistant_tool_block():
         {
             "role": "assistant",
             "content": "",
-            "tool_calls": [{"id": "1", "function": {"name": "ping", "arguments": "{}"}}],
+            "tool_calls": [{"id": "1", "function": {"name": "ping", "arguments": "{}"}, "thought_signature": _SIG}],
         },
         {"role": "tool", "name": "ping", "content": "pong"},
         {"role": "user", "content": "thanks"},
@@ -38,8 +44,8 @@ def test_drops_incomplete_assistant_tool_calls_tail():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "1", "function": {"name": "a", "arguments": "{}"}},
-                {"id": "2", "function": {"name": "b", "arguments": "{}"}},
+                {"id": "1", "function": {"name": "a", "arguments": "{}"}, "thought_signature": _SIG},
+                {"id": "2", "function": {"name": "b", "arguments": "{}"}, "thought_signature": _SIG},
             ],
         },
         {"role": "tool", "name": "a", "content": "1"},
@@ -47,3 +53,47 @@ def test_drops_incomplete_assistant_tool_calls_tail():
     ]
     out = _sanitize_gemini_tool_sequence(messages)
     assert [m.get("role") for m in out] == ["user", "user"]
+
+
+def test_drops_assistant_tool_block_without_gemini_thought_signature():
+    messages = [
+        {"role": "user", "content": "go"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "1", "function": {"name": "ping", "arguments": "{}"}}],
+        },
+        {"role": "tool", "name": "ping", "content": "pong"},
+        {"role": "user", "content": "next"},
+    ]
+
+    out = _sanitize_gemini_tool_sequence(messages)
+    assert [m.get("role") for m in out] == ["user", "user"]
+
+
+def test_normalize_preserves_gemini_thought_signature():
+    out = normalize_tool_calls(
+        [{"function": {"name": "ping", "arguments": {}}, "thought_signature": _SIG}]
+    )
+    assert out[0]["thought_signature"] == _SIG
+
+
+def test_build_contents_replays_gemini_thought_signature():
+    provider = GeminiProvider.__new__(GeminiProvider)
+    _, contents = provider._build_contents(
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "function": {"name": "ping", "arguments": {}},
+                        "thought_signature": _SIG,
+                    }
+                ],
+            }
+        ]
+    )
+
+    part = contents[0].parts[0]
+    assert part.thought_signature == base64.b64decode(_SIG)

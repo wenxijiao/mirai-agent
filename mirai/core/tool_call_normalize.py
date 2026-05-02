@@ -77,11 +77,18 @@ def _single_tool_call_to_dict(tc: Any) -> dict[str, Any] | None:
         if not str(name).strip():
             return None
         args = _coerce_arguments(fn.get("arguments"))
-        return {
+        out = {
             "id": str(tc.get("id") or ""),
             "type": str(tc.get("type") or "function"),
             "function": {"name": str(name), "arguments": args},
         }
+        thought_signature = tc.get("thought_signature") or tc.get("thoughtSignature")
+        if isinstance(thought_signature, str) and thought_signature.strip():
+            # Gemini 3 requires replayed functionCall parts to carry this
+            # opaque token. Keep it JSON-safe while still returning the
+            # provider-neutral OpenAI-style tool call shape.
+            out["thought_signature"] = thought_signature.strip()
+        return out
 
     if hasattr(tc, "model_dump") and callable(tc.model_dump):
         try:
