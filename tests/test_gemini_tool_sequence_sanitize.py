@@ -76,10 +76,44 @@ def test_drops_assistant_tool_block_without_gemini_thought_signature():
     assert [m.get("role") for m in out] == ["user", "user"]
 
 
+def test_drops_tool_call_block_when_window_starts_after_only_system_rows():
+    messages = [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "system", "content": "Relevant memory."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "1", "function": {"name": "ping", "arguments": "{}"}, "thought_signature": _SIG}],
+        },
+        {"role": "tool", "name": "ping", "content": "pong"},
+        {"role": "user", "content": "morning"},
+    ]
+
+    out = _sanitize_gemini_tool_sequence(messages)
+
+    assert [m.get("role") for m in out] == ["system", "system", "user"]
+
+
+def test_keeps_tool_call_after_assistant_text_when_merged_turn_follows_user():
+    messages = [
+        {"role": "user", "content": "play it again"},
+        {"role": "assistant", "content": "Sure, I will play it again."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "1", "function": {"name": "play", "arguments": "{}"}, "thought_signature": _SIG}],
+        },
+        {"role": "tool", "name": "play", "content": "ok"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    out = _sanitize_gemini_tool_sequence(messages)
+
+    assert [m.get("role") for m in out] == ["user", "assistant", "assistant", "tool", "user"]
+
+
 def test_normalize_preserves_gemini_thought_signature():
-    out = normalize_tool_calls(
-        [{"function": {"name": "ping", "arguments": {}}, "thought_signature": _SIG}]
-    )
+    out = normalize_tool_calls([{"function": {"name": "ping", "arguments": {}}, "thought_signature": _SIG}])
     assert out[0]["thought_signature"] == _SIG
 
 

@@ -13,6 +13,26 @@ from mirai.logging_config import get_logger
 _logger = get_logger(__name__)
 
 
+def _gemini_tool_call_has_valid_predecessor(messages: list[dict[str, Any]]) -> bool:
+    """Return whether a functionCall turn can legally follow the kept history."""
+    idx = len(messages) - 1
+    while idx >= 0 and messages[idx].get("role") == "system":
+        idx -= 1
+    if idx < 0:
+        return False
+
+    # Consecutive assistant text rows are merged with the functionCall into one
+    # model turn later, so validate against the turn before that assistant run.
+    while idx >= 0 and messages[idx].get("role") == "assistant" and not messages[idx].get("tool_calls"):
+        idx -= 1
+        while idx >= 0 and messages[idx].get("role") == "system":
+            idx -= 1
+
+    if idx < 0:
+        return False
+    return messages[idx].get("role") in ("user", "tool")
+
+
 def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Sanitise message history so it satisfies Gemini's strict turn-ordering rules.
 
@@ -41,6 +61,16 @@ def _sanitize_gemini_tool_sequence(messages: list[dict[str, Any]]) -> list[dict[
             if n == 0:
                 out.append(m)
                 i += 1
+                continue
+            if not _gemini_tool_call_has_valid_predecessor(out):
+                # A persisted functionCall block can appear at the start of the
+                # memory window after only system rows. Gemini rejects that
+                # because functionCall must follow a user/function-response turn.
+                dropped_blocks += 1
+                j = i + 1
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    j += 1
+                i = j
                 continue
             if any(not _gemini_tool_call_signature(tc) for tc in tcalls):
                 # Gemini 3 requires functionCall history parts to carry the
