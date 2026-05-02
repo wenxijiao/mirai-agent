@@ -9,6 +9,7 @@ from mirai.core.memories.memory import Memory
 from mirai.core.plugins import get_session_scope
 from mirai.core.prompts.composer import compose_messages, messages_have_multimodal_images
 from mirai.core.providers.base import BaseLLMProvider
+from mirai.core.providers.diagnostics import provider_name, write_provider_failure_diagnostic
 from mirai.core.providers.error_classify import is_multimodal_vision_rejection
 from mirai.core.streaming.think_parser import ThinkTagParser
 from mirai.logging_config import get_logger
@@ -92,6 +93,20 @@ class MiraiBot:
         full_thought = ""
         parser = ThinkTagParser()
 
+        def _record_provider_failure(exc: Exception, msgs: list[dict], phase: str) -> None:
+            path = write_provider_failure_diagnostic(
+                exc=exc,
+                provider=provider_name(self.provider),
+                model=self.model_name,
+                messages=msgs,
+                tools=tools,
+                session_id=session_id,
+                prompt=prompt,
+                phase=phase,
+            )
+            if path:
+                logger.error("Provider request failed; wrote diagnostic snapshot to %s", path)
+
         async def _consume_stream(msgs: list[dict]):
             nonlocal full_response, full_thought, parser
             async for chunk in self.provider.chat_stream(
@@ -141,11 +156,13 @@ class MiraiBot:
                 try:
                     async for chunk in _consume_stream(messages_fb):
                         yield chunk
-                except Exception:
+                except Exception as fb_exc:
+                    _record_provider_failure(fb_exc, messages_fb, "chat_stream_text_only_fallback")
                     if prompt:
                         memory.delete_message(user_message_id)
                     raise
             else:
+                _record_provider_failure(exc, messages, "chat_stream")
                 if prompt:
                     memory.delete_message(user_message_id)
                 raise

@@ -7,6 +7,7 @@ import re
 from typing import Any, AsyncIterator
 
 from mirai.core.providers.base import BaseLLMProvider
+from mirai.core.providers.diagnostics import short_text, write_provider_failure_diagnostic
 from mirai.logging_config import get_logger
 
 _logger = get_logger(__name__)
@@ -109,6 +110,34 @@ def _decode_gemini_thought_signature(value: str) -> bytes | None:
     except Exception:
         _logger.debug("Gemini: ignoring invalid thought_signature on persisted tool call")
         return None
+
+
+def _summarize_gemini_contents(contents: list[Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for content in contents:
+        entry: dict[str, Any] = {"role": getattr(content, "role", None), "parts": []}
+        for part in getattr(content, "parts", None) or []:
+            part_summary: dict[str, Any] = {}
+            text = getattr(part, "text", None)
+            function_call = getattr(part, "function_call", None)
+            function_response = getattr(part, "function_response", None)
+            if text:
+                part_summary["type"] = "text"
+                part_summary["text_preview"] = short_text(text, limit=300)
+            elif function_call:
+                part_summary["type"] = "function_call"
+                part_summary["name"] = getattr(function_call, "name", None)
+                part_summary["args_preview"] = short_text(getattr(function_call, "args", None), limit=300)
+                part_summary["has_thought_signature"] = bool(getattr(part, "thought_signature", None))
+            elif function_response:
+                part_summary["type"] = "function_response"
+                part_summary["name"] = getattr(function_response, "name", None)
+                part_summary["response_preview"] = short_text(getattr(function_response, "response", None), limit=300)
+            else:
+                part_summary["type"] = type(part).__name__
+            entry["parts"].append(part_summary)
+        out.append(entry)
+    return out
 
 
 def _merge_consecutive_gemini_contents(contents: list[Any]) -> list[Any]:
@@ -342,55 +371,72 @@ class GeminiProvider(BaseLLMProvider):
 
         gemini_tools = _convert_tools_to_gemini(tools)
 
-        response = self._client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                **config,
-                tools=gemini_tools,
+        try:
+            response = self._client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    **config,
+                    tools=gemini_tools,
+                )
+                if (config or gemini_tools)
+                else None,
             )
-            if (config or gemini_tools)
-            else None,
-        )
 
-        collected_tool_calls: list[dict] = []
-        last_usage = None
+            collected_tool_calls: list[dict] = []
+            last_usage = None
 
-        for chunk in response:
-            um = getattr(chunk, "usage_metadata", None)
-            if um is not None:
-                last_usage = um
-            if not chunk.candidates:
-                continue
+            for chunk in response:
+                um = getattr(chunk, "usage_metadata", None)
+                if um is not None:
+                    last_usage = um
+                if not chunk.candidates:
+                    continue
 
-            cand = chunk.candidates[0]
-            content = getattr(cand, "content", None)
-            if content is None:
-                continue
-            parts = getattr(content, "parts", None)
-            if not parts:
-                continue
+                cand = chunk.candidates[0]
+                content = getattr(cand, "content", None)
+                if content is None:
+                    continue
+                parts = getattr(content, "parts", None)
+                if not parts:
+                    continue
 
-            for part in parts:
-                if part.function_call:
-                    fc = part.function_call
-                    args = dict(fc.args) if fc.args else {}
-                    call: dict[str, Any] = {"function": {"name": fc.name, "arguments": args}}
-                    signature = getattr(part, "thought_signature", None)
-                    if signature:
-                        call["thought_signature"] = base64.b64encode(signature).decode("ascii")
-                    collected_tool_calls.append(call)
-                elif part.text:
-                    yield {"type": "text", "content": part.text}
+                for part in parts:
+                    if part.function_call:
+                        fc = part.function_call
+                        args = dict(fc.args) if fc.args else {}
+                        call: dict[str, Any] = {"function": {"name": fc.name, "arguments": args}}
+                        signature = getattr(part, "thought_signature", None)
+                        if signature:
+                            call["thought_signature"] = base64.b64encode(signature).decode("ascii")
+                        collected_tool_calls.append(call)
+                    elif part.text:
+                        yield {"type": "text", "content": part.text}
 
-        if collected_tool_calls:
-            yield {"type": "tool_call", "tool_calls": collected_tool_calls}
+            if collected_tool_calls:
+                yield {"type": "tool_call", "tool_calls": collected_tool_calls}
 
-        if last_usage is not None:
-            pt = int(getattr(last_usage, "prompt_token_count", None) or 0)
-            ct = int(getattr(last_usage, "candidates_token_count", None) or 0)
-            if pt or ct:
-                yield {"type": "usage", "prompt_tokens": pt, "completion_tokens": ct, "model": model}
+            if last_usage is not None:
+                pt = int(getattr(last_usage, "prompt_token_count", None) or 0)
+                ct = int(getattr(last_usage, "candidates_token_count", None) or 0)
+                if pt or ct:
+                    yield {"type": "usage", "prompt_tokens": pt, "completion_tokens": ct, "model": model}
+        except Exception as exc:
+            path = write_provider_failure_diagnostic(
+                exc=exc,
+                provider="gemini",
+                model=model,
+                messages=messages,
+                tools=tools,
+                extra={
+                    "cleaned_messages": len(cleaned),
+                    "system_instruction_preview": short_text(system_instruction),
+                    "gemini_contents": _summarize_gemini_contents(contents),
+                },
+            )
+            if path:
+                _logger.error("Gemini request failed; wrote diagnostic snapshot to %s", path)
+            raise
 
     def embed(self, model: str, text: str) -> list[float]:
         result = self._client.models.embed_content(
