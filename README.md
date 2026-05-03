@@ -265,6 +265,12 @@ flowchart TB
 
 Your app connects to the Mirai server over WebSocket and registers functions as tools. The LLM sees them alongside server-side tools and calls whichever it needs. Results flow back through the same connection.
 
+## Documentation
+
+- [Configuration](docs/CONFIGURATION.md): all `~/.mirai/config.json` fields, environment variables, and where settings live.
+- [Tool Registration](docs/TOOL_REGISTRATION.md): how to register functions/tools, all registration parameters, confirmation, and proactive tool options.
+- [Edge Tools](docs/EDGE_TOOLS.md): Edge setup, connection, routing, and SDK overview.
+
 ## Main Commands
 
 | Command | What it does |
@@ -281,6 +287,7 @@ Your app connects to the Mirai server over WebSocket and registers functions as 
 | `mirai --cleanup` | Delete all Mirai user data (`~/.mirai/`) |
 | `mirai --cleanup-memory` | Delete saved chat memory and embeddings only |
 | `mirai --setup` | Reconfigure models and providers |
+| `mirai --config` | Create/update `~/.mirai/config.json` with all known settings and defaults |
 
 ## Telegram (optional)
 

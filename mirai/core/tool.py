@@ -73,6 +73,10 @@ def _build_tool_schema(
     name: str | None = None,
     params: Dict[str, str] | None = None,
     returns: str | None = None,
+    allow_proactive: bool = False,
+    proactive_context: bool = False,
+    proactive_context_args: Dict[str, Any] | None = None,
+    proactive_context_description: str | None = None,
 ) -> Dict[str, Any]:
     """Build an OpenAI-style function schema from *func* and its annotations."""
     tool_name = name or func.__name__
@@ -103,7 +107,7 @@ def _build_tool_schema(
             param_schema["description"] = f"Parameter: {param_name}"
         properties[param_name] = param_schema
 
-    return {
+    schema: Dict[str, Any] = {
         "type": "function",
         "function": {
             "name": tool_name,
@@ -111,6 +115,15 @@ def _build_tool_schema(
             "parameters": {"type": "object", "properties": properties, "required": required_params},
         },
     }
+    if allow_proactive:
+        schema["allow_proactive"] = True
+    if proactive_context:
+        schema["proactive_context"] = True
+    if proactive_context_args is not None:
+        schema["proactive_context_args"] = proactive_context_args
+    if proactive_context_description:
+        schema["proactive_context_description"] = proactive_context_description
+    return schema
 
 
 def register_tool(
@@ -120,6 +133,10 @@ def register_tool(
     name: str | None = None,
     params: Dict[str, str] | None = None,
     returns: str | None = None,
+    allow_proactive: bool = False,
+    proactive_context: bool = False,
+    proactive_context_args: Dict[str, Any] | None = None,
+    proactive_context_description: str | None = None,
 ) -> None:
     """Register a plain function as a Mirai tool (non-decorator API).
 
@@ -134,10 +151,31 @@ def register_tool(
         name: Override the tool name (defaults to ``func.__name__``).
         params: Mapping of parameter name → human-readable description.
         returns: Description of the return value (appended to description).
+        allow_proactive: If True, this read-only tool may be exposed to proactive messaging.
+        proactive_context: If True, call this tool before proactive generation and inject the result as context.
+        proactive_context_args: Fixed arguments used for proactive context calls.
+        proactive_context_description: Label for the injected proactive context line.
     """
-    schema = _build_tool_schema(func, description, name=name, params=params, returns=returns)
+    schema = _build_tool_schema(
+        func,
+        description,
+        name=name,
+        params=params,
+        returns=returns,
+        allow_proactive=allow_proactive,
+        proactive_context=proactive_context,
+        proactive_context_args=proactive_context_args,
+        proactive_context_description=proactive_context_description,
+    )
     tool_name = schema["function"]["name"]
-    TOOL_REGISTRY[tool_name] = {"schema": schema, "callable": func}
+    TOOL_REGISTRY[tool_name] = {
+        "schema": schema,
+        "callable": func,
+        "allow_proactive": allow_proactive,
+        "proactive_context": proactive_context,
+        "proactive_context_args": proactive_context_args,
+        "proactive_context_description": proactive_context_description,
+    }
 
 
 async def execute_registered_tool(tool_name: str, arguments: Dict[str, Any]):

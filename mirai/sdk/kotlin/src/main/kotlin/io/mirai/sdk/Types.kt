@@ -35,6 +35,10 @@ data class RegisterOptions(
     val timeout: Int? = null,
     val requireConfirmation: Boolean = false,
     val alwaysInclude: Boolean = false,
+    val allowProactive: Boolean = false,
+    val proactiveContext: Boolean = false,
+    val proactiveContextArgs: JsonObject? = null,
+    val proactiveContextDescription: String? = null,
     val handler: ToolHandler,
 )
 

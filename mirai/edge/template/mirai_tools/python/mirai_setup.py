@@ -54,6 +54,9 @@ def init_mirai():
     # High-value tools that should bypass dynamic routing every turn:
     # agent.register(get_status, "Read current app status", always_include=True)
     #
+    # Read-only tools can opt in to proactive messaging context:
+    # agent.register(get_status, "Read current app status", allow_proactive=True, proactive_context=True)
+    #
     # Tool confirmation choices (Tools page / chat "always allow") are saved next to your
     # .env as .mirai_tool_confirmation.json (override with MIRAI_TOOL_CONFIRMATION_PATH).
 

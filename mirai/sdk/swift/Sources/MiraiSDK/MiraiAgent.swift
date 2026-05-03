@@ -255,6 +255,10 @@ public final class MiraiAgent: @unchecked Sendable {
     ///   - requireConfirmation: If true, the user must approve before the
     ///     server invokes this tool.
     ///   - alwaysInclude: If true, this edge tool is exposed to the model on every turn.
+    ///   - allowProactive: If true, proactive messaging may use this read-only tool.
+    ///   - proactiveContext: If true, proactive messaging calls this tool before generation.
+    ///   - proactiveContextArgs: Fixed arguments for proactive context calls.
+    ///   - proactiveContextDescription: Label used when injecting proactive context.
     ///   - handler: The closure to execute. Receives ``ToolArguments`` and
     ///     returns a string result. May be async and throw.
     public func register(
@@ -264,6 +268,10 @@ public final class MiraiAgent: @unchecked Sendable {
         timeout: Int? = nil,
         requireConfirmation: Bool = false,
         alwaysInclude: Bool = false,
+        allowProactive: Bool = false,
+        proactiveContext: Bool = false,
+        proactiveContextArgs: [String: Any]? = nil,
+        proactiveContextDescription: String? = nil,
         handler: @escaping @Sendable (ToolArguments) async throws -> String
     ) {
         let schema = buildToolSchema(
@@ -272,7 +280,11 @@ public final class MiraiAgent: @unchecked Sendable {
             parameters: parameters,
             timeout: timeout,
             requireConfirmation: requireConfirmation,
-            alwaysInclude: alwaysInclude
+            alwaysInclude: alwaysInclude,
+            allowProactive: allowProactive,
+            proactiveContext: proactiveContext,
+            proactiveContextArgs: proactiveContextArgs,
+            proactiveContextDescription: proactiveContextDescription
         )
         tools[name] = RegisteredTool(
             schema: schema,

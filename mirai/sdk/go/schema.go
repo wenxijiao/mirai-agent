@@ -44,6 +44,18 @@ func BuildToolSchema(opts RegisterOptions) map[string]interface{} {
 	if opts.AlwaysInclude {
 		schema["always_include"] = true
 	}
+	if opts.AllowProactive {
+		schema["allow_proactive"] = true
+	}
+	if opts.ProactiveContext {
+		schema["proactive_context"] = true
+	}
+	if opts.ProactiveContextArgs != nil {
+		schema["proactive_context_args"] = opts.ProactiveContextArgs
+	}
+	if opts.ProactiveContextDescription != "" {
+		schema["proactive_context_description"] = opts.ProactiveContextDescription
+	}
 
 	return schema
 }

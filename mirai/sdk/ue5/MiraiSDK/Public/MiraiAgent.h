@@ -46,6 +46,10 @@ struct FMiraiRegisterOptions
     int32 Timeout = 0;
     bool bRequireConfirmation = false;
     bool bAlwaysInclude = false;
+    bool bAllowProactive = false;
+    bool bProactiveContext = false;
+    TSharedPtr<FJsonObject> ProactiveContextArgs;
+    FString ProactiveContextDescription;
 };
 
 /**

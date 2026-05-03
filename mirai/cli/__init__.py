@@ -5,6 +5,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from mirai.core.auth import _LEGACY_LAN_PREFIXES, LAN_TOKEN_PREFIX
 from mirai.core.config import (
@@ -12,6 +13,7 @@ from mirai.core.config import (
     cleanup_memory_data,
     cleanup_user_data,
     ensure_chat_model_configured,
+    ensure_full_model_config_file,
     ensure_provider_available,
     get_lan_secret,
     get_line_bot_port,
@@ -846,6 +848,44 @@ def run_tool_routing_config(args) -> None:
     print()
 
 
+def run_config_file() -> None:
+    """Create/update ~/.mirai/config.json with all known fields and open it."""
+
+    config = ensure_full_model_config_file()
+    print()
+    print(f"  Mirai config written to: {CONFIG_PATH}")
+    if _open_path_with_default_app(CONFIG_PATH):
+        print("  Opened config file in your default editor/app.")
+    else:
+        print("  Could not auto-open it; open the path above manually.")
+    print()
+    print("  Edit this one file for persistent settings. Environment variables still override it at runtime.")
+    print()
+    print("  Proactive messaging defaults:")
+    print(f"  - proactive_enabled: {config.proactive_enabled}")
+    print(f"  - proactive_session_ids: {config.proactive_session_ids}")
+    print(f"  - proactive_daily_limit: {config.proactive_daily_limit}")
+    print(f"  - proactive_check_interval_seconds: {config.proactive_check_interval_seconds}")
+    print(f"  - proactive_min_idle_minutes: {config.proactive_min_idle_minutes}")
+    print(f"  - proactive_unreplied_escalation_minutes: {config.proactive_unreplied_escalation_minutes}")
+    print(f"  - proactive_quiet_hours: {config.proactive_quiet_hours}")
+    print()
+
+
+def _open_path_with_default_app(path: Path) -> bool:
+    """Best-effort open using the OS default app without blocking Mirai."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif os.name == "nt":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        return True
+    except Exception:
+        return False
+
+
 def main():
     from mirai.core.env_load import load_mirai_dotenv
 
@@ -875,6 +915,7 @@ def main():
     )
     group.add_argument("--demo", action="store_true", help="Run the Smart Home + Planner (schedule) demo")
     group.add_argument("--setup", action="store_true", help="Configure Mirai models")
+    group.add_argument("--config", action="store_true", help="Create/show the full ~/.mirai/config.json settings file")
     group.add_argument("--tool-routing", action="store_true", help="Show or configure edge tool routing")
     group.add_argument("--cleanup", action="store_true", help="Delete Mirai user data")
     group.add_argument("--cleanup-memory", action="store_true", help="Delete Mirai memory only")
@@ -925,12 +966,13 @@ def main():
         or args.edge
         or args.demo
         or args.setup
+        or args.config
         or args.cleanup
         or args.cleanup_memory
         or args.tool_routing
     ):
         raise SystemExit(
-            "  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--cleanup/--tool-routing."
+            "  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--config/--cleanup/--tool-routing."
         )
 
     try:
@@ -946,6 +988,8 @@ def main():
             run_line_standalone()
         elif args.setup:
             run_model_setup(force=True)
+        elif args.config:
+            run_config_file()
         elif args.tool_routing:
             run_tool_routing_config(args)
         elif args.cleanup:

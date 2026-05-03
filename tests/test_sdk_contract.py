@@ -155,10 +155,16 @@ def test_optional_schema_fields_accepted():
         "timeout": 60,
         "require_confirmation": True,
         "always_include": True,
+        "allow_proactive": True,
+        "proactive_context": True,
+        "proactive_context_args": {"location": "Auckland"},
+        "proactive_context_description": "Current weather",
     }
     assert schema_with_extras["timeout"] == 60
     assert schema_with_extras["require_confirmation"] is True
     assert schema_with_extras["always_include"] is True
+    assert schema_with_extras["allow_proactive"] is True
+    assert schema_with_extras["proactive_context"] is True
 
 
 # ── Go SDK RegisterOptions field names match server expectations ──
@@ -169,7 +175,19 @@ def test_go_register_options_fields():
     with open(path, encoding="utf-8") as f:
         source = f.read()
 
-    for field in ("Name", "Description", "Parameters", "Timeout", "RequireConfirmation", "AlwaysInclude", "Handler"):
+    for field in (
+        "Name",
+        "Description",
+        "Parameters",
+        "Timeout",
+        "RequireConfirmation",
+        "AlwaysInclude",
+        "AllowProactive",
+        "ProactiveContext",
+        "ProactiveContextArgs",
+        "ProactiveContextDescription",
+        "Handler",
+    ):
         assert field in source, f"Go RegisterOptions missing field: {field}"
 
 
@@ -181,7 +199,19 @@ def test_ts_register_options_fields():
     with open(path, encoding="utf-8") as f:
         source = f.read()
 
-    for field in ("name", "description", "parameters", "timeout", "requireConfirmation", "alwaysInclude", "handler"):
+    for field in (
+        "name",
+        "description",
+        "parameters",
+        "timeout",
+        "requireConfirmation",
+        "alwaysInclude",
+        "allowProactive",
+        "proactiveContext",
+        "proactiveContextArgs",
+        "proactiveContextDescription",
+        "handler",
+    ):
         assert field in source, f"TS RegisterOptions missing field: {field}"
 
 

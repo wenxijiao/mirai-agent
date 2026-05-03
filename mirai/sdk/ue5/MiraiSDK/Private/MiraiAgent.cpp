@@ -191,6 +191,22 @@ TSharedPtr<FJsonObject> FMiraiAgent::BuildToolSchema(const FMiraiRegisterOptions
     {
         Schema->SetBoolField(TEXT("always_include"), true);
     }
+    if (Opts.bAllowProactive)
+    {
+        Schema->SetBoolField(TEXT("allow_proactive"), true);
+    }
+    if (Opts.bProactiveContext)
+    {
+        Schema->SetBoolField(TEXT("proactive_context"), true);
+    }
+    if (Opts.ProactiveContextArgs.IsValid())
+    {
+        Schema->SetObjectField(TEXT("proactive_context_args"), Opts.ProactiveContextArgs);
+    }
+    if (!Opts.ProactiveContextDescription.IsEmpty())
+    {
+        Schema->SetStringField(TEXT("proactive_context_description"), Opts.ProactiveContextDescription);
+    }
 
     return Schema;
 }

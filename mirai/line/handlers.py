@@ -33,6 +33,7 @@ from mirai.core.plugins import (
     get_quota_policy,
     get_session_scope,
 )
+from mirai.core.proactive import record_user_message
 from mirai.core.prompts.http_bridge import (
     format_effective_prompt_reply,
     http_delete_session_prompt,
@@ -458,6 +459,7 @@ async def handle_line_message_event(
         prompt = raw
         if not prompt:
             return
+        record_user_message(session_id)
 
         accumulated: list[str] = []
         async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
@@ -526,6 +528,7 @@ async def handle_line_message_event(
         if not prompt:
             await reply_text("Transcription produced no text.")
             return
+        record_user_message(session_id)
 
         accumulated: list[str] = []
         async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
@@ -572,6 +575,7 @@ async def handle_line_message_event(
             await reply_text("Could not process this media.")
             return
         prompt = "\n".join(parts)
+        record_user_message(session_id)
         media_receipts: list[dict[str, Any]] = []
         if parts and (parts[0].startswith("/") or parts[0].startswith("~")):
             p0 = parts[0]

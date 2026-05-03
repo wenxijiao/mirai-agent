@@ -46,6 +46,10 @@ def test_edge_websocket_register_and_disconnect():
                             "parameters": {"type": "object", "properties": {}, "required": []},
                         },
                         "always_include": True,
+                        "allow_proactive": True,
+                        "proactive_context": True,
+                        "proactive_context_args": {"location": "Auckland"},
+                        "proactive_context_description": "Current weather",
                     }
                 ],
             }
@@ -54,7 +58,12 @@ def test_edge_websocket_register_and_disconnect():
         entry = EDGE_TOOLS_REGISTRY.get("test-device", {}).get("edge_test-device__ping")
         assert entry is not None
         assert entry["always_include"] is True
+        assert entry["allow_proactive"] is True
+        assert entry["proactive_context"] is True
+        assert entry["proactive_context_args"] == {"location": "Auckland"}
+        assert entry["proactive_context_description"] == "Current weather"
         assert "always_include" not in entry["schema"]
+        assert "allow_proactive" not in entry["schema"]
 
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:

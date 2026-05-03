@@ -21,6 +21,10 @@ pub fn init_mirai() {
         timeout: None,
         require_confirmation: false,
         always_include: false,
+        allow_proactive: false,
+        proactive_context: false,
+        proactive_context_args: None,
+        proactive_context_description: None,
         handler: Arc::new(|args| {
             let name = args.string("name");
             if name.is_empty() {

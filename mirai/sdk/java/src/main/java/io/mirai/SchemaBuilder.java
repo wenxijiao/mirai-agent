@@ -46,6 +46,18 @@ public final class SchemaBuilder {
         if (opts.isAlwaysInclude()) {
             schema.addProperty("always_include", true);
         }
+        if (opts.isAllowProactive()) {
+            schema.addProperty("allow_proactive", true);
+        }
+        if (opts.isProactiveContext()) {
+            schema.addProperty("proactive_context", true);
+        }
+        if (opts.getProactiveContextArgs() != null) {
+            schema.add("proactive_context_args", com.google.gson.GsonBuilder().create().toJsonTree(opts.getProactiveContextArgs()));
+        }
+        if (opts.getProactiveContextDescription() != null && !opts.getProactiveContextDescription().isBlank()) {
+            schema.addProperty("proactive_context_description", opts.getProactiveContextDescription());
+        }
 
         return schema;
     }

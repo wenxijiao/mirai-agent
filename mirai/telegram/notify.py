@@ -68,13 +68,31 @@ async def send_timer_result_to_telegram(
         else:
             body = f"[Timer] {description}"
 
-    text = "⏰ " + body
+    await send_text_to_telegram(session_id, "⏰ " + body)
+
+
+async def send_text_to_telegram(session_id: str, text: str, *, prefix: str = "") -> bool:
+    """Send arbitrary text to a Telegram session via Bot API."""
     chunks = _chunk_message(text)
     if not chunks:
-        chunks = ["⏰ Timer completed."]
+        return False
+    if prefix:
+        chunks[0] = f"[{prefix}] {chunks[0]}"
+
+    chat_id = parse_telegram_chat_id(session_id)
+    if chat_id is None:
+        return False
+    token = get_telegram_bot_token()
+    if not token:
+        logger.info(
+            "Telegram proactive send skipped: no bot token in this API process. "
+            "Set TELEGRAM_BOT_TOKEN or telegram_bot_token in ~/.mirai/config.json."
+        )
+        return False
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     timeout = httpx.Timeout(20.0, connect=10.0)
+    sent_any = False
     async with httpx.AsyncClient(timeout=timeout) as client:
         for part in chunks:
             try:
@@ -98,7 +116,8 @@ async def send_timer_result_to_telegram(
                 except Exception:
                     payload = {}
                 if payload.get("ok") is True:
-                    logger.info("Telegram timer message sent to chat_id=%s", chat_id)
+                    logger.info("Telegram message sent to chat_id=%s", chat_id)
+                    sent_any = True
                 else:
                     logger.warning(
                         "Telegram sendMessage rejected: %s",
@@ -106,3 +125,4 @@ async def send_timer_result_to_telegram(
                     )
             except Exception as exc:
                 logger.warning("Telegram sendMessage error: %s", exc)
+    return sent_any

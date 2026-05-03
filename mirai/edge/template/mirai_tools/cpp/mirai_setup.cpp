@@ -44,6 +44,17 @@ mirai::MiraiAgent* initMirai() {
     //         return "Deleted everything";
     //     },
     // });
+    //
+    // Read-only tools can opt in to proactive messaging context:
+    // agent->registerTool({
+    //     .name = "get_status",
+    //     .description = "Read current app status",
+    //     .allowProactive = true,
+    //     .proactiveContext = true,
+    //     .handler = [](const mirai::ToolArguments&) -> std::string {
+    //         return "ok";
+    //     },
+    // });
 
     agent->runInBackground();
     return agent;

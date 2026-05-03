@@ -54,6 +54,18 @@ internal static class SchemaBuilder
         if (opts.AlwaysInclude)
             schema["always_include"] = true;
 
+        if (opts.AllowProactive)
+            schema["allow_proactive"] = true;
+
+        if (opts.ProactiveContext)
+            schema["proactive_context"] = true;
+
+        if (opts.ProactiveContextArgs != null)
+            schema["proactive_context_args"] = JsonSerializer.SerializeToNode(opts.ProactiveContextArgs);
+
+        if (!string.IsNullOrWhiteSpace(opts.ProactiveContextDescription))
+            schema["proactive_context_description"] = opts.ProactiveContextDescription;
+
         return schema;
     }
 }

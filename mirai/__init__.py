@@ -40,6 +40,10 @@ def register(
     timeout: int | None = None,
     require_confirmation: bool = False,
     always_include: bool = False,
+    allow_proactive: bool = False,
+    proactive_context: bool = False,
+    proactive_context_args: dict | None = None,
+    proactive_context_description: str | None = None,
 ) -> None:
     """Register a tool on the default agent.
 
@@ -59,6 +63,10 @@ def register(
         timeout=timeout,
         require_confirmation=require_confirmation,
         always_include=always_include,
+        allow_proactive=allow_proactive,
+        proactive_context=proactive_context,
+        proactive_context_args=proactive_context_args,
+        proactive_context_description=proactive_context_description,
     )
 
 

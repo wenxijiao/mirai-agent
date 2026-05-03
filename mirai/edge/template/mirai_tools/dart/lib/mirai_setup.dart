@@ -20,6 +20,9 @@ void initMirai() {
         if (n.isEmpty) return 'Hello, World!';
         return 'Hello, $n!';
       },
+      // Read-only tools can opt in to proactive messaging:
+      // allowProactive: true,
+      // proactiveContext: true,
     ),
   );
   agent.runInBackground();

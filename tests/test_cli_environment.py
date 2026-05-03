@@ -54,3 +54,25 @@ def test_tool_routing_cli_updates_config(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Edge dynamic routing: disabled" in out
     assert "Edge tools per turn:  7" in out
+
+
+def test_config_cli_writes_full_config(monkeypatch, tmp_path, capsys):
+    p = tmp_path / "config.json"
+    monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
+    monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
+    monkeypatch.setattr(cli, "CONFIG_PATH", p)
+    monkeypatch.setattr(sys, "argv", ["mirai", "--config"])
+    monkeypatch.setattr(cli, "configure_logging", lambda: None)
+    opened = []
+    monkeypatch.setattr(cli, "_open_path_with_default_app", lambda path: opened.append(path) or True)
+
+    cli.main()
+
+    saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["proactive_enabled"] is False
+    assert saved["proactive_quiet_hours"] == "00:30-08:30"
+    assert opened == [p]
+    out = capsys.readouterr().out
+    assert "Mirai config written to:" in out
+    assert "Opened config file" in out
+    assert "Proactive messaging defaults:" in out

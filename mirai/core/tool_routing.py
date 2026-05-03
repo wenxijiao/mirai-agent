@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from mirai.core.api.state import model_visible_tool_schema
 from mirai.core.config import load_model_config
 from mirai.core.memories.embedding_state import get_embed_provider, is_degenerate_vector
 from mirai.core.plugins import get_current_identity, get_edge_scope
@@ -467,7 +468,7 @@ def select_tool_schemas(
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     decision = ToolRoutingDecision(
-        tools=[entry.schema for entry in core_entries + selected_edge],
+        tools=[model_visible_tool_schema(entry.schema) for entry in core_entries + selected_edge],
         core_tools=core_entries,
         selected_edge_tools=selected_edge,
         total_edge_tools=len(edge_entries),

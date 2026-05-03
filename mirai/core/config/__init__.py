@@ -41,7 +41,12 @@ from mirai.core.config.paths import (
     migrate_legacy_memory_dir,
 )
 from mirai.core.config.setup_wizard import run_model_setup
-from mirai.core.config.store import load_model_config, load_saved_model_config, save_model_config
+from mirai.core.config.store import (
+    ensure_full_model_config_file,
+    load_model_config,
+    load_saved_model_config,
+    save_model_config,
+)
 from mirai.core.config.telegram import (
     get_telegram_allowed_user_ids,
     get_telegram_bot_token,
@@ -73,6 +78,7 @@ __all__ = [
     "delete_session_prompt",
     "ensure_chat_model_configured",
     "ensure_config_dir",
+    "ensure_full_model_config_file",
     "ensure_memory_dir",
     "ensure_model_ready",
     "ensure_ollama_available",

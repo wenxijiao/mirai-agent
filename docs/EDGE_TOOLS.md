@@ -4,6 +4,8 @@ Edge tools let the LLM call functions inside your own app or device process. You
 
 Mirai loads core server tools on every turn, but Edge tools are dynamically routed by default. All tools registered by connected Edge processes stay in the server registry; for each chat turn Mirai uses the configured embedding model to select the most relevant Edge tool schemas (default: 20) before calling the LLM.
 
+For the full parameter reference for `register(...)`, `RegisterOptions`, confirmation, and proactive tool metadata, see [`TOOL_REGISTRATION.md`](TOOL_REGISTRATION.md).
+
 ## Quick Start
 
 ```bash
@@ -248,6 +250,12 @@ Connection resolution is the same across all SDKs:
 Set `require_confirmation=True` (Python) or the equivalent flag in other SDKs for tools with irreversible side effects. The user must approve in the Mirai UI or terminal chat before the tool is invoked.
 
 Tool confirmation policy is persisted to disk when the platform supports it. Browser-based TypeScript keeps it in memory.
+
+## Proactive Messaging Tool Opt-In
+
+Proactive messaging never uses tools by default. Read-only tools can opt in with `allow_proactive=True` (or the equivalent SDK flag). Tools can also set `proactive_context=True` plus optional fixed `proactive_context_args` so Mirai calls them before generating a proactive message and injects the result as background context.
+
+Do not enable proactive access for tools with side effects. Tools that require confirmation are filtered out of unattended proactive runs.
 
 ## `mirai --edge` Mapping
 

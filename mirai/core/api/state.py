@@ -16,12 +16,23 @@ from mirai.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+_TOOL_RUNTIME_METADATA_KEYS = {
+    "allow_proactive",
+    "proactive_context",
+    "proactive_context_args",
+    "proactive_context_description",
+    "timeout",
+    "require_confirmation",
+    "always_include",
+}
+
 # Set True after SIGTERM so load balancers stop routing new traffic (see routes lifespan).
 server_draining: bool = False
 
 # ── bot singleton ──
 
 bot = None  # set by lifespan; typed as MiraiBot | None
+proactive_service = None  # set by lifespan when proactive messaging is enabled
 
 # ── edge connections ──
 
@@ -125,11 +136,16 @@ def get_all_tool_schemas(identity=None):
     all_tools = []
     for name, tool_data in TOOL_REGISTRY.items():
         if name not in DISABLED_TOOLS:
-            all_tools.append(tool_data["schema"])
+            all_tools.append(model_visible_tool_schema(tool_data["schema"]))
 
     edge_extras = get_edge_scope().filter_edge_tool_schemas(identity, EDGE_TOOLS_REGISTRY, DISABLED_TOOLS)
     all_tools.extend(edge_extras)
     return all_tools
+
+
+def model_visible_tool_schema(schema: dict) -> dict:
+    """Return a provider-facing schema without Mirai-only runtime metadata."""
+    return {k: v for k, v in dict(schema).items() if k not in _TOOL_RUNTIME_METADATA_KEYS}
 
 
 def get_tool_timeout(prefixed_name: str) -> int:

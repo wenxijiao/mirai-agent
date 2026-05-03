@@ -116,6 +116,10 @@ type RegisterOptions struct {
 	Timeout             *int // per-tool timeout override (seconds)
 	RequireConfirmation bool
 	AlwaysInclude       bool // include this edge tool in every model request
+	AllowProactive      bool // allow this tool in proactive messaging
+	ProactiveContext    bool // call before proactive generation and inject result
+	ProactiveContextArgs map[string]interface{}
+	ProactiveContextDescription string
 	Handler             ToolHandler
 }
 

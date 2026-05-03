@@ -178,11 +178,19 @@ async def handle_edge_peer(peer):
             tool_timeout = schema_copy.pop("timeout", None)
             require_confirmation = bool(schema_copy.pop("require_confirmation", False))
             always_include = bool(schema_copy.pop("always_include", False))
+            allow_proactive = bool(schema_copy.pop("allow_proactive", False))
+            proactive_context = bool(schema_copy.pop("proactive_context", False))
+            proactive_context_args = schema_copy.pop("proactive_context_args", None)
+            proactive_context_description = schema_copy.pop("proactive_context_description", None)
             EDGE_TOOLS_REGISTRY[connection_key][prefixed_name] = {
                 "schema": schema_copy,
                 "timeout": tool_timeout,
                 "require_confirmation": require_confirmation,
                 "always_include": always_include,
+                "allow_proactive": allow_proactive,
+                "proactive_context": proactive_context,
+                "proactive_context_args": proactive_context_args if isinstance(proactive_context_args, dict) else None,
+                "proactive_context_description": proactive_context_description,
             }
 
         apply_edge_tool_confirmation_policy(
@@ -227,11 +235,21 @@ async def handle_edge_peer(peer):
                     tool_timeout = schema_copy.pop("timeout", None)
                     require_confirmation = bool(schema_copy.pop("require_confirmation", False))
                     always_include = bool(schema_copy.pop("always_include", False))
+                    allow_proactive = bool(schema_copy.pop("allow_proactive", False))
+                    proactive_context = bool(schema_copy.pop("proactive_context", False))
+                    proactive_context_args = schema_copy.pop("proactive_context_args", None)
+                    proactive_context_description = schema_copy.pop("proactive_context_description", None)
                     EDGE_TOOLS_REGISTRY[connection_key][prefixed_name] = {
                         "schema": schema_copy,
                         "timeout": tool_timeout,
                         "require_confirmation": require_confirmation,
                         "always_include": always_include,
+                        "allow_proactive": allow_proactive,
+                        "proactive_context": proactive_context,
+                        "proactive_context_args": proactive_context_args
+                        if isinstance(proactive_context_args, dict)
+                        else None,
+                        "proactive_context_description": proactive_context_description,
                     }
                 apply_edge_tool_confirmation_policy(
                     tool_prefix,

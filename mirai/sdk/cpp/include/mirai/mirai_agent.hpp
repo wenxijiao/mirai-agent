@@ -87,7 +87,11 @@ inline nlohmann::json buildToolSchema(
     const std::vector<ToolParameter>& parameters,
     bool requireConfirmation = false,
     int timeout = 0,
-    bool alwaysInclude = false
+    bool alwaysInclude = false,
+    bool allowProactive = false,
+    bool proactiveContext = false,
+    nlohmann::json proactiveContextArgs = nullptr,
+    std::string proactiveContextDescription = ""
 ) {
     nlohmann::json properties = nlohmann::json::object();
     std::vector<std::string> requiredParams;
@@ -123,6 +127,18 @@ inline nlohmann::json buildToolSchema(
     }
     if (alwaysInclude) {
         schema["always_include"] = true;
+    }
+    if (allowProactive) {
+        schema["allow_proactive"] = true;
+    }
+    if (proactiveContext) {
+        schema["proactive_context"] = true;
+    }
+    if (!proactiveContextArgs.is_null()) {
+        schema["proactive_context_args"] = proactiveContextArgs;
+    }
+    if (!proactiveContextDescription.empty()) {
+        schema["proactive_context_description"] = proactiveContextDescription;
     }
 
     return schema;
@@ -176,6 +192,10 @@ struct RegisterOptions {
     int timeout = 0;
     bool requireConfirmation = false;
     bool alwaysInclude = false;
+    bool allowProactive = false;
+    bool proactiveContext = false;
+    nlohmann::json proactiveContextArgs = nullptr;
+    std::string proactiveContextDescription;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -812,7 +832,9 @@ public:
     void registerTool(RegisterOptions opts) {
         auto schema = buildToolSchema(
             opts.name, opts.description, opts.parameters,
-            opts.requireConfirmation, opts.timeout, opts.alwaysInclude
+            opts.requireConfirmation, opts.timeout, opts.alwaysInclude,
+            opts.allowProactive, opts.proactiveContext,
+            opts.proactiveContextArgs, opts.proactiveContextDescription
         );
 
         std::lock_guard<std::mutex> lock(toolsMutex_);

@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from mirai.core.api.uploads import MAX_UPLOAD_BYTES, save_uploaded_file
 from mirai.core.config import get_telegram_allowed_user_ids, get_telegram_bot_token
 from mirai.core.connection import DEFAULT_LOCAL_SERVER_URL, ConnectionConfig
+from mirai.core.proactive import record_user_message
 from mirai.core.prompts.http_bridge import (
     format_effective_prompt_reply,
     http_delete_session_prompt,
@@ -473,6 +474,7 @@ def build_application():
             return
 
         prompt = "\n".join(parts)
+        record_user_message(session_id)
 
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 

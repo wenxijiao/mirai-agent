@@ -64,5 +64,9 @@ export interface RegisterOptions {
   timeout?: number;
   requireConfirmation?: boolean;
   alwaysInclude?: boolean;
+  allowProactive?: boolean;
+  proactiveContext?: boolean;
+  proactiveContextArgs?: Record<string, unknown>;
+  proactiveContextDescription?: string;
   handler: ToolHandler;
 }

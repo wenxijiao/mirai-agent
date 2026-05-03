@@ -1,5 +1,89 @@
 # Configuration
 
+Mirai's main persistent settings live in one file: `~/.mirai/config.json`.
+
+To create or refresh that file with every known key and its default value:
+
+```bash
+mirai --config
+```
+
+Edit that JSON file for normal persistent configuration. Environment variables are still supported and always override the file at runtime, which is useful for secrets, Docker, CI, and system services.
+
+## Config File Reference
+
+`config.json` is standard JSON, so it cannot contain comments. Run `mirai --config` whenever you want a complete file with every currently supported key.
+
+Model and provider fields:
+
+- `chat_provider`: Chat model provider. Common values: `ollama`, `openai`, `gemini`, `claude`. Default: `ollama`.
+- `chat_model`: Chat model name. `null` means Mirai will use provider defaults/setup.
+- `embedding_provider`: Embedding provider. Default: `ollama`.
+- `embedding_model`: Embedding model name. `null` means provider default/setup.
+- `embedding_dim`: Optional embedding vector dimension override. Usually leave `null`.
+- `openai_api_key`, `openai_base_url`, `gemini_api_key`, `claude_api_key`: Saved provider credentials/base URL. Environment variables override these.
+
+Prompt and session fields:
+
+- `system_prompt`: Global system prompt override. `null` uses Mirai's default prompt.
+- `session_prompts`: Per-session prompt overrides, keyed by session id such as `tg_123`.
+- `chat_append_current_time`: Append current time to normal chat system context. Default: `true`.
+- `chat_append_tool_use_instruction`: Append Mirai tool-use guidance when tools are available. Default: `true`.
+
+Connection and UI fields:
+
+- `connection_code`: Saved LAN/relay/WebSocket connection code for clients and Edge SDKs.
+- `ui_dark_mode`: UI dark mode preference. Default: `true`.
+- `lan_secret`: Local LAN pairing secret. Usually managed by Mirai.
+
+Memory fields:
+
+- `memory_max_recent_messages`: Recent same-session messages included in context. Default: `10`.
+- `memory_max_related_messages`: Related cross-session memory snippets included in context. `0` disables cross-session related memory. Default: `5`.
+
+Tool policy fields:
+
+- `local_tools_always_allow`: Server-local tool names that do not require confirmation.
+- `local_tools_force_confirm`: Server-local tool names that always require confirmation.
+- `edge_tools_enable_dynamic_routing`: Rank and cap Edge tools per turn. Default: `true`.
+- `edge_tools_retrieval_limit`: Max Edge tool schemas exposed per turn. Default: `20`.
+- `core_tools_always_include`: Keep core server tools loaded when enabled. Default: `true`.
+- `core_tools_allow_disable`: Allow core tools to be disabled by tool policy/UI. Default: `true`.
+
+Telegram fields:
+
+- `telegram_bot_token`: Telegram Bot API token from BotFather. Environment variable: `TELEGRAM_BOT_TOKEN`.
+- `telegram_allowed_user_ids`: Optional numeric Telegram user allowlist. Empty means no allowlist.
+
+LINE fields:
+
+- `line_channel_secret`: LINE Messaging API channel secret.
+- `line_channel_access_token`: LINE channel access token.
+- `line_bot_port`: Port for the LINE webhook sidecar. Default: `8788`.
+- `line_allowed_user_ids`: Optional LINE user allowlist. Empty means no allowlist.
+
+Proactive messaging fields:
+
+- `proactive_enabled`: Enable proactive outbound messages. Default: `false`.
+- `proactive_channels`: Channels to use. First version supports `telegram`. Default: `["telegram"]`.
+- `proactive_session_ids`: Target sessions, for example `["tg_123456"]`. Empty means no target.
+- `proactive_daily_limit`: Max proactive sends per session per day. Default: `4`.
+- `proactive_quiet_hours`: Quiet-hour window, such as `00:30-08:30`. Default: `00:30-08:30`.
+- `proactive_check_interval_seconds`: Background check interval. Default: `900`.
+- `proactive_min_idle_minutes`: Minimum idle time after user/proactive activity before a check-in. Default: `45`.
+- `proactive_unreplied_escalation_minutes`: Time before an unreplied follow-up can escalate. Default: `180`.
+- `proactive_profile`: Open profile label. Built-in hints include `default`, `companion`, `tutor`, and `coach`, but custom labels are allowed.
+- `proactive_profile_prompt`: Custom proactive style instructions. When set, this has priority over built-in profile hints.
+- `proactive_tone_intensity`: Follow-up intensity. Suggested values: `gentle`, `medium`, `strong`. Default: `gentle`.
+
+Speech-to-text fields:
+
+- `stt_provider`: Speech-to-text provider. `disabled` by default; `whisper` enables local Whisper.
+- `stt_backend`: STT backend. Default: `faster-whisper`.
+- `stt_model`: Whisper model name, for example `base`, `small`, or `turbo`.
+- `stt_model_dir`: Optional model cache directory. `null` uses Mirai's default.
+- `stt_language`: Language hint. Default: `auto`.
+
 ## Environment Variables
 
 ### Model & API Keys
@@ -37,6 +121,24 @@
 |---|---|
 | `MIRAI_CHAT_APPEND_CURRENT_TIME` | Set to `1`/`true` to append the current time to the system prompt |
 | `MIRAI_CHAT_APPEND_TOOL_INSTRUCTION` | Set to `1`/`true` to append tool-use instructions to the system prompt |
+
+### Proactive Messaging
+
+| Variable | Description |
+|---|---|
+| `MIRAI_PROACTIVE_ENABLED` | Enable proactive outbound messages (default `false`) |
+| `MIRAI_PROACTIVE_CHANNELS` | Comma-separated channels, currently `telegram` |
+| `MIRAI_PROACTIVE_SESSION_IDS` | Comma-separated target sessions, for example `tg_123456` |
+| `MIRAI_PROACTIVE_DAILY_LIMIT` | Max proactive sends per session per day (default `4`) |
+| `MIRAI_PROACTIVE_QUIET_HOURS` | Local quiet-hour window like `00:30-08:30` |
+| `MIRAI_PROACTIVE_CHECK_INTERVAL_SECONDS` | Background check interval (default `900`) |
+| `MIRAI_PROACTIVE_MIN_IDLE_MINUTES` | Minimum idle time after user/proactive activity before a check-in (default `45`) |
+| `MIRAI_PROACTIVE_UNREPLIED_ESCALATION_MINUTES` | Time before an unreplied follow-up can escalate (default `180`) |
+| `MIRAI_PROACTIVE_PROFILE` | Open profile label, for example `default`, `companion`, `tutor`, `coach`, or custom |
+| `MIRAI_PROACTIVE_PROFILE_PROMPT` | Custom proactive behavior prompt, overrides preset guidance |
+| `MIRAI_PROACTIVE_TONE_INTENSITY` | `gentle`, `medium`, or `strong` |
+
+For a more frequent companion-style setup, prefer editing the same keys in `~/.mirai/config.json` after running `mirai --config`.
 
 ### Speech-to-Text
 

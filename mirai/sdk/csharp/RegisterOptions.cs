@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Mirai;
 
 /// <summary>
@@ -11,6 +13,10 @@ public sealed class RegisterOptions
     public int? Timeout { get; private set; }
     public bool RequireConfirmation { get; private set; }
     public bool AlwaysInclude { get; private set; }
+    public bool AllowProactive { get; private set; }
+    public bool ProactiveContext { get; private set; }
+    public Dictionary<string, object>? ProactiveContextArgs { get; private set; }
+    public string? ProactiveContextDescription { get; private set; }
     public ToolHandler? Handler { get; private set; }
 
     public RegisterOptions SetName(string name) { Name = name; return this; }
@@ -19,5 +25,9 @@ public sealed class RegisterOptions
     public RegisterOptions SetTimeout(int seconds) { Timeout = seconds; return this; }
     public RegisterOptions SetRequireConfirmation(bool v) { RequireConfirmation = v; return this; }
     public RegisterOptions SetAlwaysInclude(bool v) { AlwaysInclude = v; return this; }
+    public RegisterOptions SetAllowProactive(bool v) { AllowProactive = v; return this; }
+    public RegisterOptions SetProactiveContext(bool v) { ProactiveContext = v; return this; }
+    public RegisterOptions SetProactiveContextArgs(Dictionary<string, object> args) { ProactiveContextArgs = args; return this; }
+    public RegisterOptions SetProactiveContextDescription(string description) { ProactiveContextDescription = description; return this; }
     public RegisterOptions SetHandler(ToolHandler h) { Handler = h; return this; }
 }

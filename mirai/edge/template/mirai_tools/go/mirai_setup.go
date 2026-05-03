@@ -47,6 +47,17 @@ func InitMirai() {
 	//         return "done"
 	//     },
 	// })
+	//
+	// Example: read-only tool allowed as proactive messaging context
+	// agent.Register(mirai.RegisterOptions{
+	//     Name:             "get_status",
+	//     Description:      "Read current app status",
+	//     AllowProactive:   true,
+	//     ProactiveContext: true,
+	//     Handler: func(args mirai.ToolArguments) string {
+	//         return "ok"
+	//     },
+	// })
 
 	agent.RunInBackground()
 }

@@ -20,6 +20,10 @@
 //!     require_confirmation: false,
 //!     timeout: None,
 //!     always_include: false,
+//!     allow_proactive: false,
+//!     proactive_context: false,
+//!     proactive_context_args: None,
+//!     proactive_context_description: None,
 //!     handler: std::sync::Arc::new(|args| {
 //!         format!("Hello, {}!", args.string("name"))
 //!     }),

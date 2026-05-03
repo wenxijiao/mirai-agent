@@ -42,7 +42,11 @@ func buildToolSchema(
     parameters: [ToolParameter],
     timeout: Int? = nil,
     requireConfirmation: Bool = false,
-    alwaysInclude: Bool = false
+    alwaysInclude: Bool = false,
+    allowProactive: Bool = false,
+    proactiveContext: Bool = false,
+    proactiveContextArgs: [String: Any]? = nil,
+    proactiveContextDescription: String? = nil
 ) -> [String: Any] {
     var properties: [String: Any] = [:]
     var required: [String] = []
@@ -82,6 +86,18 @@ func buildToolSchema(
     }
     if alwaysInclude {
         schema["always_include"] = true
+    }
+    if allowProactive {
+        schema["allow_proactive"] = true
+    }
+    if proactiveContext {
+        schema["proactive_context"] = true
+    }
+    if let proactiveContextArgs {
+        schema["proactive_context_args"] = proactiveContextArgs
+    }
+    if let proactiveContextDescription, !proactiveContextDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        schema["proactive_context_description"] = proactiveContextDescription
     }
 
     return schema

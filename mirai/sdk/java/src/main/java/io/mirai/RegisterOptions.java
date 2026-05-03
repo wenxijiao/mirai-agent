@@ -3,6 +3,7 @@ package io.mirai;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builder-style configuration for registering a tool with MiraiAgent.
@@ -14,6 +15,10 @@ public class RegisterOptions {
     private Integer timeout;
     private boolean requireConfirmation;
     private boolean alwaysInclude;
+    private boolean allowProactive;
+    private boolean proactiveContext;
+    private Map<String, Object> proactiveContextArgs;
+    private String proactiveContextDescription;
     private ToolHandler handler;
 
     public RegisterOptions name(String name) { this.name = name; return this; }
@@ -23,6 +28,10 @@ public class RegisterOptions {
     public RegisterOptions timeout(int seconds) { this.timeout = seconds; return this; }
     public RegisterOptions requireConfirmation(boolean v) { this.requireConfirmation = v; return this; }
     public RegisterOptions alwaysInclude(boolean v) { this.alwaysInclude = v; return this; }
+    public RegisterOptions allowProactive(boolean v) { this.allowProactive = v; return this; }
+    public RegisterOptions proactiveContext(boolean v) { this.proactiveContext = v; return this; }
+    public RegisterOptions proactiveContextArgs(Map<String, Object> v) { this.proactiveContextArgs = v; return this; }
+    public RegisterOptions proactiveContextDescription(String v) { this.proactiveContextDescription = v; return this; }
     public RegisterOptions handler(ToolHandler h) { this.handler = h; return this; }
 
     public String getName() { return name; }
@@ -31,5 +40,9 @@ public class RegisterOptions {
     public Integer getTimeout() { return timeout; }
     public boolean isRequireConfirmation() { return requireConfirmation; }
     public boolean isAlwaysInclude() { return alwaysInclude; }
+    public boolean isAllowProactive() { return allowProactive; }
+    public boolean isProactiveContext() { return proactiveContext; }
+    public Map<String, Object> getProactiveContextArgs() { return proactiveContextArgs; }
+    public String getProactiveContextDescription() { return proactiveContextDescription; }
     public ToolHandler getHandler() { return handler; }
 }

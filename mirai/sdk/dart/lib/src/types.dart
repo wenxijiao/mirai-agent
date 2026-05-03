@@ -54,6 +54,10 @@ class RegisterOptions {
   final int? timeout;
   final bool requireConfirmation;
   final bool alwaysInclude;
+  final bool allowProactive;
+  final bool proactiveContext;
+  final Map<String, dynamic>? proactiveContextArgs;
+  final String? proactiveContextDescription;
   final MiraiToolHandler handler;
 
   RegisterOptions({
@@ -63,6 +67,10 @@ class RegisterOptions {
     this.timeout,
     this.requireConfirmation = false,
     this.alwaysInclude = false,
+    this.allowProactive = false,
+    this.proactiveContext = false,
+    this.proactiveContextArgs,
+    this.proactiveContextDescription,
     required this.handler,
   });
 }

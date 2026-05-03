@@ -243,6 +243,14 @@ def _wire_tool_schema(tool_entry: dict) -> dict:
         sch["require_confirmation"] = True
     if tool_entry.get("always_include"):
         sch["always_include"] = True
+    if tool_entry.get("allow_proactive"):
+        sch["allow_proactive"] = True
+    if tool_entry.get("proactive_context"):
+        sch["proactive_context"] = True
+    if tool_entry.get("proactive_context_args") is not None:
+        sch["proactive_context_args"] = tool_entry.get("proactive_context_args")
+    if tool_entry.get("proactive_context_description"):
+        sch["proactive_context_description"] = tool_entry.get("proactive_context_description")
     return sch
 
 
@@ -448,6 +456,10 @@ class MiraiAgent:
         timeout: int | None = None,
         require_confirmation: bool = False,
         always_include: bool = False,
+        allow_proactive: bool = False,
+        proactive_context: bool = False,
+        proactive_context_args: dict[str, Any] | None = None,
+        proactive_context_description: str | None = None,
     ) -> None:
         """Register a tool function.
 
@@ -492,6 +504,12 @@ class MiraiAgent:
                 on the edge.
             always_include: If True, this edge tool is included in every
                 model request. Defaults to False.
+            allow_proactive: If True, this read-only tool may be used by
+                proactive messaging. Defaults to False.
+            proactive_context: If True, proactive messaging calls this tool
+                before generation and injects the result as context.
+            proactive_context_args: Fixed arguments for proactive context calls.
+            proactive_context_description: Label used when injecting the result.
         """
         schema = _build_tool_schema(func, name, description, params, returns)
         if timeout is not None:
@@ -502,6 +520,10 @@ class MiraiAgent:
             "callable": func,
             "require_confirmation": require_confirmation,
             "always_include": always_include,
+            "allow_proactive": allow_proactive,
+            "proactive_context": proactive_context,
+            "proactive_context_args": proactive_context_args,
+            "proactive_context_description": proactive_context_description,
         }
 
     def run_in_background(self) -> None:

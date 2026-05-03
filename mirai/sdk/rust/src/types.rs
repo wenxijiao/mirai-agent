@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use serde_json::Value;
 
 /// Arguments for a tool invocation (`tool_call` from the server).
 #[derive(Clone)]
@@ -74,6 +75,10 @@ pub struct RegisterOptions {
     pub timeout: Option<u32>,
     pub require_confirmation: bool,
     pub always_include: bool,
+    pub allow_proactive: bool,
+    pub proactive_context: bool,
+    pub proactive_context_args: Option<Value>,
+    pub proactive_context_description: Option<String>,
     pub handler: ToolHandler,
 }
 

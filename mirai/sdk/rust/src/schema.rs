@@ -50,6 +50,30 @@ pub fn build_tool_schema(opts: &RegisterOptions) -> Value {
             .unwrap()
             .insert("always_include".to_string(), json!(true));
     }
+    if opts.allow_proactive {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("allow_proactive".to_string(), json!(true));
+    }
+    if opts.proactive_context {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("proactive_context".to_string(), json!(true));
+    }
+    if let Some(args) = &opts.proactive_context_args {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("proactive_context_args".to_string(), args.clone());
+    }
+    if let Some(description) = &opts.proactive_context_description {
+        schema
+            .as_object_mut()
+            .unwrap()
+            .insert("proactive_context_description".to_string(), json!(description));
+    }
 
     schema
 }

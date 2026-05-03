@@ -3,7 +3,7 @@
 import json
 
 from mirai.core.config import ModelConfig
-from mirai.core.config.store import load_model_config
+from mirai.core.config.store import ensure_full_model_config_file, load_model_config
 
 
 def test_model_config_default_provider():
@@ -38,3 +38,19 @@ def test_model_config_stt_env_overrides(monkeypatch, tmp_path):
     assert cfg.stt_model == "small"
     assert cfg.stt_model_dir == "/tmp/mirai-whisper"
     assert cfg.stt_language == "auto"
+
+
+def test_full_config_file_writes_all_default_keys(monkeypatch, tmp_path):
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"chat_model": "m"}), encoding="utf-8")
+    monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
+    monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
+
+    cfg = ensure_full_model_config_file()
+    saved = json.loads(p.read_text(encoding="utf-8"))
+
+    assert cfg.chat_model == "m"
+    assert saved["chat_model"] == "m"
+    assert saved["proactive_enabled"] is False
+    assert saved["proactive_check_interval_seconds"] == 900
+    assert saved["telegram_bot_token"] is None

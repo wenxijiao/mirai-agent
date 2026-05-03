@@ -34,5 +34,17 @@ fun buildToolSchema(opts: RegisterOptions): JsonObject {
     if (opts.alwaysInclude) {
         schema.addProperty("always_include", true)
     }
+    if (opts.allowProactive) {
+        schema.addProperty("allow_proactive", true)
+    }
+    if (opts.proactiveContext) {
+        schema.addProperty("proactive_context", true)
+    }
+    if (opts.proactiveContextArgs != null) {
+        schema.add("proactive_context_args", opts.proactiveContextArgs)
+    }
+    if (!opts.proactiveContextDescription.isNullOrBlank()) {
+        schema.addProperty("proactive_context_description", opts.proactiveContextDescription)
+    }
     return schema
 }

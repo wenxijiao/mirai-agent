@@ -33,5 +33,18 @@ Map<String, dynamic> buildToolSchema(RegisterOptions opts) {
   if (opts.alwaysInclude) {
     schema['always_include'] = true;
   }
+  if (opts.allowProactive) {
+    schema['allow_proactive'] = true;
+  }
+  if (opts.proactiveContext) {
+    schema['proactive_context'] = true;
+  }
+  if (opts.proactiveContextArgs != null) {
+    schema['proactive_context_args'] = opts.proactiveContextArgs;
+  }
+  if (opts.proactiveContextDescription != null &&
+      opts.proactiveContextDescription!.trim().isNotEmpty) {
+    schema['proactive_context_description'] = opts.proactiveContextDescription;
+  }
   return schema;
 }

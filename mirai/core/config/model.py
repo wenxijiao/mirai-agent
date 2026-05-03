@@ -41,6 +41,18 @@ class ModelConfig(BaseModel):
     line_channel_access_token: str | None = None
     line_bot_port: int = Field(default=8788, ge=1, le=65535)
     line_allowed_user_ids: list[str] = Field(default_factory=list)
+    # Proactive messaging (optional, default off): scheduled user-facing follow-ups.
+    proactive_enabled: bool = False
+    proactive_channels: list[str] = Field(default_factory=lambda: ["telegram"])
+    proactive_session_ids: list[str] = Field(default_factory=list)
+    proactive_daily_limit: int = Field(default=4, ge=0, le=100)
+    proactive_quiet_hours: str = "00:30-08:30"
+    proactive_check_interval_seconds: int = Field(default=900, ge=60, le=86400)
+    proactive_min_idle_minutes: int = Field(default=45, ge=1, le=10080)
+    proactive_unreplied_escalation_minutes: int = Field(default=180, ge=1, le=10080)
+    proactive_profile: str = "default"
+    proactive_profile_prompt: str | None = None
+    proactive_tone_intensity: str = "gentle"
     # Speech-to-text (optional): disabled by default so text-only installs stay lightweight.
     stt_provider: str = "disabled"
     stt_backend: str = "faster-whisper"
