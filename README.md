@@ -1,6 +1,6 @@
 # Mirai
 
-[![CI](https://github.com/wenxijiao/Mirai/actions/workflows/ci.yml/badge.svg)](https://github.com/wenxijiao/Mirai/actions/workflows/ci.yml)
+[![CI](https://github.com/wenxijiao/mirai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/wenxijiao/mirai-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
