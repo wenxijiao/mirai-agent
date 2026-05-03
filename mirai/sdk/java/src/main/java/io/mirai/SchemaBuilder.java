@@ -1,5 +1,6 @@
 package io.mirai;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
@@ -53,7 +54,7 @@ public final class SchemaBuilder {
             schema.addProperty("proactive_context", true);
         }
         if (opts.getProactiveContextArgs() != null) {
-            schema.add("proactive_context_args", com.google.gson.GsonBuilder().create().toJsonTree(opts.getProactiveContextArgs()));
+            schema.add("proactive_context_args", new Gson().toJsonTree(opts.getProactiveContextArgs()));
         }
         if (opts.getProactiveContextDescription() != null && !opts.getProactiveContextDescription().isBlank()) {
             schema.addProperty("proactive_context_description", opts.getProactiveContextDescription());
