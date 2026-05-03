@@ -70,3 +70,60 @@ def test_hybrid_structured_retrieval_falls_back_to_keyword():
         structured = [msg for msg in ctx if msg["role"] == "system" and "Structured memory" in msg["content"]]
         assert structured
         assert "LanceDB" in structured[0]["content"]
+
+
+def test_context_dedupes_consecutive_identical_user_repeats():
+    with tempfile.TemporaryDirectory() as td:
+        m = Memory(session_id="s_user_dupe", storage_dir=td, max_recent=20)
+        m.add_message("user", "earlier")
+        m.add_message("user", "晚安")
+        m.add_message("user", "晚安")
+        m.add_message("user", "晚安")
+
+        ctx = m.get_context(query="anything")
+        user_msgs = [msg for msg in ctx if msg["role"] == "user"]
+        assert [msg["content"].split("] ", 1)[-1] for msg in user_msgs] == ["earlier", "晚安"]
+
+
+def test_context_drops_leading_orphan_assistant_tool_call_when_window_truncates(monkeypatch):
+    from mirai.core.memories import context as ctx_mod
+
+    real_load = ctx_mod.load_model_config
+
+    def _capped_load_model_config():
+        cfg = real_load()
+        cfg.memory_max_recent_messages = 5
+        return cfg
+
+    monkeypatch.setattr(ctx_mod, "load_model_config", _capped_load_model_config)
+
+    with tempfile.TemporaryDirectory() as td:
+        m = Memory(session_id="s_window_orphan", storage_dir=td, max_recent=5)
+        for n in range(5):
+            m.add_message("user", f"older {n}")
+        m.persist_openai_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "play_song", "arguments": {"q": "桥边姑娘"}},
+                        }
+                    ],
+                },
+                {"role": "tool", "name": "play_song", "content": "ok"},
+            ]
+        )
+        m.add_message("user", "later one")
+        m.add_message("user", "later two")
+        m.add_message("user", "later three")
+
+        ctx = m.get_context(query="anything")
+        non_system = [msg for msg in ctx if msg["role"] != "system"]
+        assert all("tool_calls" not in msg for msg in non_system)
+        assert all(msg["role"] != "tool" for msg in non_system)
+        assert non_system, "expected user messages to remain after trimming"
+        assert non_system[0]["role"] == "user"

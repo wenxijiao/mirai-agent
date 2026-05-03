@@ -47,6 +47,14 @@ def _trim_leading_orphan_tool_rows(rows: list[dict]) -> list[dict]:
     return _transcript.trim_leading_orphan_tool_rows(rows)
 
 
+def _trim_leading_orphan_assistant_tool_calls(rows: list[dict]) -> list[dict]:
+    return _transcript.trim_leading_orphan_assistant_tool_calls(rows)
+
+
+def _dedupe_consecutive_user_rows(rows: list[dict]) -> list[dict]:
+    return _transcript.dedupe_consecutive_user_rows(rows)
+
+
 class Memory:
     _shared_db: dict[str, object] = {}
     _initialized_dirs: set[str] = set()

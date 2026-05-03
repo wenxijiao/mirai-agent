@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import traceback
 from datetime import datetime, timezone
 from typing import Any
@@ -90,6 +91,66 @@ def provider_failure_diagnostic_path(exc: Exception) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _safe_filename_token(raw: str, *, max_len: int, fallback: str) -> str:
+    """ASCII-ish token safe for filenames across macOS/Linux/Windows."""
+    text = "".join(c if 32 <= ord(c) < 127 else " " for c in (raw or "").strip())
+    text = re.sub(r"\s+", " ", text).strip()[: max_len * 2]
+    token = re.sub(r"[^a-zA-Z0-9._-]+", "-", text)
+    token = re.sub(r"-{2,}", "-", token).strip("-._")
+    if not token:
+        return fallback[:max_len]
+    return token[:max_len]
+
+
+def _diagnostic_error_hint(exc: Exception) -> str:
+    """Short single-line hint from the exception for the filename."""
+    msg = str(exc).strip()
+    if not msg:
+        return type(exc).__name__
+    first = msg.split("\n", 1)[0].strip()
+    for prefix in ("400 ", "401 ", "403 ", "404 ", "429 ", "500 ", "503 "):
+        if first.startswith(prefix):
+            first = first[len(prefix) :].lstrip()
+            break
+    if "{" in first and len(first) > 100:
+        first = first.split("{", 1)[0].rstrip(": ").strip()
+    return first or type(exc).__name__
+
+
+def build_provider_diagnostic_filename(
+    *,
+    provider: str,
+    phase: str,
+    exc: Exception,
+    model: str | None = None,
+    note: str | None = None,
+    now: datetime | None = None,
+    unique_suffix_len: int = 8,
+) -> str:
+    """Build a self-describing diagnostic log basename (no directory, ends with ``.json``).
+
+    Typical pattern:
+    ``UTCstamp_provider_phase_model_error-hint_optional-note_rand.json``
+
+    ``now`` is injectable for tests.
+    """
+    dt = now or datetime.now(timezone.utc)
+    stamp = dt.strftime("%Y%m%dT%H%M%SZ")
+    prov = _safe_filename_token(provider or "provider", max_len=24, fallback="provider")
+    ph = _safe_filename_token(phase or "unknown", max_len=32, fallback="unknown")
+    parts: list[str] = [stamp, prov, ph]
+    model_tag = _safe_filename_token((model or "").strip(), max_len=40, fallback="")
+    if model_tag:
+        parts.append(model_tag)
+    hint = _safe_filename_token(_diagnostic_error_hint(exc), max_len=56, fallback="error")
+    parts.append(hint)
+    if note and (n := _safe_filename_token(note, max_len=32, fallback="")):
+        parts.append(n)
+    body = "_".join(parts)
+    unique = uuid4().hex[: max(4, min(16, unique_suffix_len))]
+    return f"{body}_{unique}.json"
+
+
 def write_provider_failure_diagnostic(
     *,
     exc: Exception,
@@ -101,8 +162,13 @@ def write_provider_failure_diagnostic(
     prompt: str | None = None,
     phase: str = "chat_stream",
     extra: dict[str, Any] | None = None,
+    filename_note: str | None = None,
 ) -> str | None:
-    """Write a compact, redacted request snapshot for provider failures."""
+    """Write a compact, redacted request snapshot for provider failures.
+
+    ``filename_note`` is an optional short tag appended to the diagnostic filename
+    (e.g. ``embed`` or ``retry``) for easier scanning in ``~/.mirai/debug/``.
+    """
     existing = provider_failure_diagnostic_path(exc)
     if existing:
         return existing
@@ -110,9 +176,14 @@ def write_provider_failure_diagnostic(
     try:
         directory = debug_dir()
         os.makedirs(directory, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        safe_provider = "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in provider or "provider")
-        path = os.path.join(directory, f"{safe_provider}_request_failed_{stamp}_{uuid4().hex[:8]}.json")
+        basename = build_provider_diagnostic_filename(
+            provider=provider,
+            phase=phase,
+            exc=exc,
+            model=model,
+            note=filename_note,
+        )
+        path = os.path.join(directory, basename)
         payload: dict[str, Any] = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "provider": provider,

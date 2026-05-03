@@ -8,7 +8,12 @@ from typing import Any
 from mirai.core.config import load_model_config
 from mirai.core.memories.constants import MIRAI_V1_TOOL_CALLS, MIRAI_V1_TOOL_RESULT
 from mirai.core.memories.retrieval import HybridRetriever
-from mirai.core.memories.transcript import trim_leading_orphan_tool_rows, trim_trailing_incomplete_tool_rows
+from mirai.core.memories.transcript import (
+    dedupe_consecutive_user_rows,
+    trim_leading_orphan_assistant_tool_calls,
+    trim_leading_orphan_tool_rows,
+    trim_trailing_incomplete_tool_rows,
+)
 
 
 class ContextBuilder:
@@ -99,6 +104,14 @@ class ContextBuilder:
 
         results = trim_leading_orphan_tool_rows(results)
         results = trim_trailing_incomplete_tool_rows(results)
+        if offset > 0:
+            # Only strip orphaned assistant tool-calls when the sliding window
+            # actually cut off earlier rows — i.e. the triggering user prompt
+            # is genuinely gone.  When the whole session fits in the window,
+            # preserve the row (a malformed session without a user prompt is
+            # a separate concern handled by callers/tests).
+            results = trim_leading_orphan_assistant_tool_calls(results)
+        results = dedupe_consecutive_user_rows(results)
         return [_format_transcript_message(msg) for msg in results]
 
 
