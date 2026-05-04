@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from mirai.core.config.model import ModelConfig
 from mirai.core.proactive.planner import ProactiveDecision
 from mirai.core.proactive.profiles import profile_hint
 from mirai.core.proactive.state import ProactiveSessionState
+from mirai.core.proactive.timezone_utils import format_user_facing_time
 
 _MSG_RE = re.compile(r"<msg>(.*?)</msg>", re.DOTALL | re.IGNORECASE)
 
@@ -19,7 +20,8 @@ def build_proactive_prompt(
     now: datetime,
     context_lines: list[str] | None = None,
 ) -> str:
-    current_time = f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S %A')}"
+    now_utc = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    current_time = f"Current time: {format_user_facing_time(now_utc, cfg.local_timezone)}"
     context_items = [current_time, *[line for line in (context_lines or []) if line.strip()]]
     context = "\n".join(f"- {line}" for line in context_items)
     context_block = f"\n[Proactive Context]\n{context}\n"

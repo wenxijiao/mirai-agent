@@ -71,8 +71,11 @@ def test_config_cli_writes_full_config(monkeypatch, tmp_path, capsys):
     saved = json.loads(p.read_text(encoding="utf-8"))
     assert saved["proactive_enabled"] is False
     assert saved["proactive_quiet_hours"] == "00:30-08:30"
+    assert saved["local_timezone"] is None
+    assert saved["proactive_check_interval_jitter_ratio"] == 0.15
+    assert saved["proactive_unreplied_escalation_jitter_ratio"] == 0.0
+    assert saved["proactive_check_in_probability"] == 0.35
     assert opened == [p]
     out = capsys.readouterr().out
     assert "Mirai config written to:" in out
     assert "Opened config file" in out
-    assert "Proactive messaging defaults:" in out

@@ -27,8 +27,9 @@ Prompt and session fields:
 
 - `system_prompt`: Global system prompt override. `null` uses Mirai's default prompt.
 - `session_prompts`: Per-session prompt overrides, keyed by session id such as `tg_123`.
-- `chat_append_current_time`: Append current time to normal chat system context. Default: `true`.
+- `chat_append_current_time`: Append current time to normal chat system context. Default: `true`. The timestamp uses `local_timezone` when set (IANA), otherwise the **host** system local timezone—so Docker/servers on UTC still show your city time when you set e.g. `Pacific/Auckland` in `local_timezone`.
 - `chat_append_tool_use_instruction`: Append Mirai tool-use guidance when tools are available. Default: `true`.
+- `local_timezone`: IANA timezone for **your** local wall clock (e.g. `Pacific/Auckland`). Used for: `[Current Time]` in chat (when `chat_append_current_time` is on), proactive outbound context clock, `proactive_quiet_hours` boundaries, and the calendar day for `proactive_daily_limit`. Unset or `null`: proactive quiet hours and daily limit use **UTC**; chat `[Current Time]` falls back to the host OS timezone. **Legacy:** the old key `proactive_quiet_hours_timezone` is still read from JSON on load and mapped here; new saves use `local_timezone` only.
 
 Connection and UI fields:
 
@@ -67,11 +68,14 @@ Proactive messaging fields:
 - `proactive_enabled`: Enable proactive outbound messages. Default: `false`.
 - `proactive_channels`: Channels to use. First version supports `telegram`. Default: `["telegram"]`.
 - `proactive_session_ids`: Target sessions, for example `["tg_123456"]`. Empty means no target.
-- `proactive_daily_limit`: Max proactive sends per session per day. Default: `4`.
-- `proactive_quiet_hours`: Quiet-hour window, such as `00:30-08:30`. Default: `00:30-08:30`.
-- `proactive_check_interval_seconds`: Background check interval. Default: `900`.
+- `proactive_daily_limit`: Max proactive sends per session per calendar day in `local_timezone`. Default: `4`.
+- `proactive_quiet_hours`: Quiet-hour window on the **local wall clock** defined by `local_timezone`, such as `22:30-08:30`. Default: `00:30-08:30`.
+- `proactive_check_interval_seconds`: Approximate background check interval (minimum `60`). Default: `900`.
+- `proactive_check_interval_jitter_ratio`: Randomizes each sleep in `[interval*(1−r), interval*(1+r)]` (clamped to 60–86400s) so checks are not perfectly periodic. Default: `0.15`; set to `0` for a fixed interval.
 - `proactive_min_idle_minutes`: Minimum idle time after user/proactive activity before a check-in. Default: `45`.
-- `proactive_unreplied_escalation_minutes`: Time before an unreplied follow-up can escalate. Default: `180`.
+- `proactive_unreplied_escalation_minutes`: Base minutes before an unreplied follow-up can be sent again. Default: `180`.
+- `proactive_unreplied_escalation_jitter_ratio`: Scales the above by a **stable** factor per `(session_id, last_proactive_at)` in `[1−r, 1+r]`. Default: `0` (exact minutes); try `0.12` for less mechanical follow-ups.
+- `proactive_check_in_probability`: Probability each **eligible** check emits a random check-in (when not in the unreplied escalation path). Default: `0.35`.
 - `proactive_profile`: Open profile label. Built-in hints include `default`, `companion`, `tutor`, and `coach`, but custom labels are allowed.
 - `proactive_profile_prompt`: Custom proactive style instructions. When set, this has priority over built-in profile hints.
 - `proactive_tone_intensity`: Follow-up intensity. Suggested values: `gentle`, `medium`, `strong`. Default: `gentle`.
@@ -121,6 +125,7 @@ Speech-to-text fields:
 |---|---|
 | `MIRAI_CHAT_APPEND_CURRENT_TIME` | Set to `1`/`true` to append the current time to the system prompt |
 | `MIRAI_CHAT_APPEND_TOOL_INSTRUCTION` | Set to `1`/`true` to append tool-use instructions to the system prompt |
+| `MIRAI_LOCAL_TIMEZONE` | IANA timezone for local wall clock (chat time, proactive clock, quiet hours, daily limit). Overrides `MIRAI_PROACTIVE_QUIET_HOURS_TIMEZONE` if both are set |
 
 ### Proactive Messaging
 
@@ -130,10 +135,14 @@ Speech-to-text fields:
 | `MIRAI_PROACTIVE_CHANNELS` | Comma-separated channels, currently `telegram` |
 | `MIRAI_PROACTIVE_SESSION_IDS` | Comma-separated target sessions, for example `tg_123456` |
 | `MIRAI_PROACTIVE_DAILY_LIMIT` | Max proactive sends per session per day (default `4`) |
-| `MIRAI_PROACTIVE_QUIET_HOURS` | Local quiet-hour window like `00:30-08:30` |
-| `MIRAI_PROACTIVE_CHECK_INTERVAL_SECONDS` | Background check interval (default `900`) |
+| `MIRAI_PROACTIVE_QUIET_HOURS` | Quiet-hour window on the wall clock of `MIRAI_LOCAL_TIMEZONE` / config `local_timezone` (or UTC if unset), e.g. `22:30-08:30` |
+| `MIRAI_PROACTIVE_QUIET_HOURS_TIMEZONE` | **Legacy.** IANA timezone; prefer `MIRAI_LOCAL_TIMEZONE`. Used only when `MIRAI_LOCAL_TIMEZONE` is unset |
+| `MIRAI_PROACTIVE_CHECK_INTERVAL_SECONDS` | Background check interval (minimum `60`, default `900`) |
+| `MIRAI_PROACTIVE_CHECK_INTERVAL_JITTER_RATIO` | Sleep jitter ratio `0`–`0.5` (default `0.15`; `0` = fixed interval) |
 | `MIRAI_PROACTIVE_MIN_IDLE_MINUTES` | Minimum idle time after user/proactive activity before a check-in (default `45`) |
-| `MIRAI_PROACTIVE_UNREPLIED_ESCALATION_MINUTES` | Time before an unreplied follow-up can escalate (default `180`) |
+| `MIRAI_PROACTIVE_UNREPLIED_ESCALATION_MINUTES` | Base minutes before an unreplied follow-up can escalate (default `180`) |
+| `MIRAI_PROACTIVE_UNREPLIED_ESCALATION_JITTER_RATIO` | Stable random scale `0`–`0.5` for escalation delay (default `0`) |
+| `MIRAI_PROACTIVE_CHECK_IN_PROBABILITY` | Probability of a random check-in when eligible (default `0.35`) |
 | `MIRAI_PROACTIVE_PROFILE` | Open profile label, for example `default`, `companion`, `tutor`, `coach`, or custom |
 | `MIRAI_PROACTIVE_PROFILE_PROMPT` | Custom proactive behavior prompt, overrides preset guidance |
 | `MIRAI_PROACTIVE_TONE_INTENSITY` | `gentle`, `medium`, or `strong` |

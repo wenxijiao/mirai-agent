@@ -40,6 +40,21 @@ def test_model_config_stt_env_overrides(monkeypatch, tmp_path):
     assert cfg.stt_language == "auto"
 
 
+def test_model_config_migrates_legacy_proactive_timezone_json_key():
+    cfg = ModelConfig.model_validate({"proactive_quiet_hours_timezone": "Pacific/Auckland"})
+    assert cfg.local_timezone == "Pacific/Auckland"
+
+
+def test_model_config_local_timezone_wins_over_legacy_key_in_json():
+    cfg = ModelConfig.model_validate(
+        {
+            "local_timezone": "Europe/London",
+            "proactive_quiet_hours_timezone": "Pacific/Auckland",
+        }
+    )
+    assert cfg.local_timezone == "Europe/London"
+
+
 def test_full_config_file_writes_all_default_keys(monkeypatch, tmp_path):
     p = tmp_path / "config.json"
     p.write_text(json.dumps({"chat_model": "m"}), encoding="utf-8")
@@ -53,4 +68,8 @@ def test_full_config_file_writes_all_default_keys(monkeypatch, tmp_path):
     assert saved["chat_model"] == "m"
     assert saved["proactive_enabled"] is False
     assert saved["proactive_check_interval_seconds"] == 900
+    assert saved["local_timezone"] is None
+    assert saved["proactive_check_interval_jitter_ratio"] == 0.15
+    assert saved["proactive_unreplied_escalation_jitter_ratio"] == 0.0
+    assert saved["proactive_check_in_probability"] == 0.35
     assert saved["telegram_bot_token"] is None

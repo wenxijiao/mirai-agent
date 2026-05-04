@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from mirai.core.config.paths import CONFIG_DIR, ensure_config_dir
+from mirai.core.config.store import load_model_config
+from mirai.core.proactive.timezone_utils import proactive_calendar_date_iso
 from mirai.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -99,8 +101,9 @@ class ProactiveStateStore:
 
     def record_sent(self, session_id: str, *, trigger: str, at: datetime | None = None) -> None:
         now = (at or utc_now()).astimezone(timezone.utc)
+        cfg = load_model_config()
+        today = proactive_calendar_date_iso(now, cfg.local_timezone)
         state = self.get(session_id)
-        today = now.date().isoformat()
         if state.date != today:
             state.date = today
             state.sent_today = 0

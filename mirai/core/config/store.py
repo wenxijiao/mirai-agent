@@ -167,6 +167,34 @@ def load_model_config() -> ModelConfig:
     proactive_tone = os.getenv("MIRAI_PROACTIVE_TONE_INTENSITY")
     if proactive_tone and proactive_tone.strip():
         config.proactive_tone_intensity = proactive_tone.strip()
+    local_tz = os.getenv("MIRAI_LOCAL_TIMEZONE")
+    if local_tz and local_tz.strip():
+        config.local_timezone = local_tz.strip()
+    else:
+        legacy_proactive_tz = os.getenv("MIRAI_PROACTIVE_QUIET_HOURS_TIMEZONE")
+        if legacy_proactive_tz and legacy_proactive_tz.strip():
+            config.local_timezone = legacy_proactive_tz.strip()
+    proactive_jitter = os.getenv("MIRAI_PROACTIVE_CHECK_INTERVAL_JITTER_RATIO")
+    if proactive_jitter and proactive_jitter.strip():
+        try:
+            v = float(proactive_jitter.strip())
+            config.proactive_check_interval_jitter_ratio = float(max(0.0, min(0.5, v)))
+        except ValueError:
+            pass
+    proactive_esc_jitter = os.getenv("MIRAI_PROACTIVE_UNREPLIED_ESCALATION_JITTER_RATIO")
+    if proactive_esc_jitter and proactive_esc_jitter.strip():
+        try:
+            v = float(proactive_esc_jitter.strip())
+            config.proactive_unreplied_escalation_jitter_ratio = float(max(0.0, min(0.5, v)))
+        except ValueError:
+            pass
+    proactive_checkin_p = os.getenv("MIRAI_PROACTIVE_CHECK_IN_PROBABILITY")
+    if proactive_checkin_p and proactive_checkin_p.strip():
+        try:
+            v = float(proactive_checkin_p.strip())
+            config.proactive_check_in_probability = float(max(0.0, min(1.0, v)))
+        except ValueError:
+            pass
 
     stt_provider = os.getenv("MIRAI_STT_PROVIDER")
     if stt_provider:

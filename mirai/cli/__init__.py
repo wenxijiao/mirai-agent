@@ -851,7 +851,7 @@ def run_tool_routing_config(args) -> None:
 def run_config_file() -> None:
     """Create/update ~/.mirai/config.json with all known fields and open it."""
 
-    config = ensure_full_model_config_file()
+    ensure_full_model_config_file()
     print()
     print(f"  Mirai config written to: {CONFIG_PATH}")
     if _open_path_with_default_app(CONFIG_PATH):
@@ -860,15 +860,6 @@ def run_config_file() -> None:
         print("  Could not auto-open it; open the path above manually.")
     print()
     print("  Edit this one file for persistent settings. Environment variables still override it at runtime.")
-    print()
-    print("  Proactive messaging defaults:")
-    print(f"  - proactive_enabled: {config.proactive_enabled}")
-    print(f"  - proactive_session_ids: {config.proactive_session_ids}")
-    print(f"  - proactive_daily_limit: {config.proactive_daily_limit}")
-    print(f"  - proactive_check_interval_seconds: {config.proactive_check_interval_seconds}")
-    print(f"  - proactive_min_idle_minutes: {config.proactive_min_idle_minutes}")
-    print(f"  - proactive_unreplied_escalation_minutes: {config.proactive_unreplied_escalation_minutes}")
-    print(f"  - proactive_quiet_hours: {config.proactive_quiet_hours}")
     print()
 
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from mirai.core.proactive.timezone_utils import format_user_facing_time
 from mirai.core.prompts.defaults import (
     NO_VISION_IMAGE_UPLOAD_INSTRUCTION,
     TOOL_USE_INSTRUCTION,
@@ -146,8 +147,8 @@ def compose_messages(
     if messages and messages[0].get("role") == "system":
         extra_parts: list[str] = []
         if cfg.chat_append_current_time:
-            now = datetime.now()
-            extra_parts.append(f"\n\n[Current Time] {now.strftime('%Y-%m-%d %H:%M:%S %A')}")
+            line = format_user_facing_time(datetime.now(timezone.utc), cfg.local_timezone)
+            extra_parts.append(f"\n\n[Current Time] {line}")
         if tools and cfg.chat_append_tool_use_instruction:
             extra_parts.append(TOOL_USE_INSTRUCTION)
         if tools and prompt and _UPLOAD_PATH_RE.search(prompt):

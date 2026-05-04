@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Chat **`[Current Time]`** and proactive context clocks honor **`local_timezone`** (IANA) instead of showing raw UTC when the server runs in UTC (e.g. Docker). When unset, they use the host OS local timezone.
+
+### Added
+
+- **`local_timezone`** in `config.json`: IANA zone for user-facing wall time (chat clock, proactive context, proactive quiet hours, proactive daily limit calendar). Legacy JSON key `proactive_quiet_hours_timezone` is still read on load; prefer **`MIRAI_LOCAL_TIMEZONE`** over `MIRAI_PROACTIVE_QUIET_HOURS_TIMEZONE` at runtime.
+- Proactive messaging: `proactive_check_interval_jitter_ratio`, `proactive_unreplied_escalation_jitter_ratio`, and `proactive_check_in_probability` for less rigid scheduling; matching `MIRAI_PROACTIVE_*` environment variables.
+
 ## [0.2.0] - 2026-04-20
 
 ### Changed

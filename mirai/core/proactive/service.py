@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -15,6 +16,19 @@ from mirai.core.tool_call_normalize import normalize_tool_calls
 from mirai.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _sample_sleep_seconds(cfg) -> int:
+    """Sleep duration before the next proactive check (with optional jitter)."""
+    base = max(60, int(cfg.proactive_check_interval_seconds))
+    j = float(cfg.proactive_check_interval_jitter_ratio)
+    j = max(0.0, min(0.5, j))
+    if j <= 0:
+        return min(86400, base)
+    rng = random.Random(time.time_ns())
+    lo = base * (1.0 - j)
+    hi = base * (1.0 + j)
+    return max(60, min(86400, int(rng.uniform(lo, hi))))
 
 
 class ProactiveMessageService:
@@ -52,7 +66,7 @@ class ProactiveMessageService:
                     except Exception:
                         logger.exception("Proactive messaging failed for session_id=%s", session_id)
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=max(60, int(cfg.proactive_check_interval_seconds)))
+                await asyncio.wait_for(self._stop.wait(), timeout=_sample_sleep_seconds(cfg))
             except asyncio.TimeoutError:
                 pass
 
