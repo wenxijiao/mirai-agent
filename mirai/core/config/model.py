@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -48,7 +48,9 @@ class ModelConfig(BaseModel):
     line_channel_access_token: str | None = None
     line_bot_port: int = Field(default=8788, ge=1, le=65535)
     line_allowed_user_ids: list[str] = Field(default_factory=list)
-    # Proactive messaging (optional, default off): scheduled user-facing follow-ups.
+    # Proactive messaging (optional): off / smart (probabilistic) / scheduled (fixed times or interval).
+    # Legacy ``proactive_enabled`` is kept for JSON compatibility and is synced from ``proactive_mode`` after load.
+    proactive_mode: str = Field(default="off", description="off | smart | scheduled")
     proactive_enabled: bool = False
     proactive_channels: list[str] = Field(default_factory=lambda: ["telegram"])
     proactive_session_ids: list[str] = Field(default_factory=list)
@@ -60,12 +62,21 @@ class ModelConfig(BaseModel):
     proactive_profile: str = "default"
     proactive_profile_prompt: str | None = None
     proactive_tone_intensity: str = "gentle"
+    proactive_smart_naturalness: str = Field(default="balanced", description="off | subtle | balanced")
+    proactive_smart_max_unreplied_followups: int = Field(default=4, ge=1, le=20)
     # Jitter check loop sleep: sample in [base*(1-ratio), base*(1+ratio)] clamped to [60, 86400].
     proactive_check_interval_jitter_ratio: float = Field(default=0.15, ge=0.0, le=0.5)
     # Stable random scale for unreplied follow-up threshold (0 = exact escalation minutes).
     proactive_unreplied_escalation_jitter_ratio: float = Field(default=0.0, ge=0.0, le=0.5)
     # Probability each eligible check emits a proactive check-in (when not in unreplied escalation path).
     proactive_check_in_probability: float = Field(default=0.35, ge=0.0, le=1.0)
+    # Scheduled mode: local wall-clock times (HH:MM in ``local_timezone``) and/or fixed interval.
+    proactive_schedule_times: list[str] = Field(default_factory=list)
+    proactive_schedule_interval_minutes: int | None = Field(
+        default=None,
+        description="Minutes between scheduled sends when set (5–10080). Null disables interval scheduling.",
+    )
+    proactive_schedule_require_idle: bool = True
     # Speech-to-text (optional): disabled by default so text-only installs stay lightweight.
     stt_provider: str = "disabled"
     stt_backend: str = "faster-whisper"
@@ -73,20 +84,89 @@ class ModelConfig(BaseModel):
     stt_model_dir: str | None = None
     stt_language: str = "auto"
 
+    @field_validator("proactive_mode")
+    @classmethod
+    def _normalize_proactive_mode(cls, v: Any) -> str:
+        s = (v or "off").strip().lower()
+        if s not in ("off", "smart", "scheduled"):
+            return "off"
+        return s
+
+    @field_validator("proactive_schedule_times", mode="before")
+    @classmethod
+    def _proactive_schedule_times_before(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [p.strip() for p in v.split(",") if p.strip()]
+        if isinstance(v, list):
+            return [str(item) for item in v]
+        return []
+
+    @field_validator("proactive_schedule_times")
+    @classmethod
+    def _validate_proactive_schedule_times(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for raw in v or []:
+            s = str(raw).strip()
+            if not s:
+                continue
+            parts = s.split(":", maxsplit=1)
+            if len(parts) != 2:
+                raise ValueError(f"Invalid proactive_schedule_times entry {raw!r}; use HH:MM")
+            try:
+                h = int(parts[0].strip())
+                m = int(parts[1].strip())
+            except ValueError as exc:
+                raise ValueError(f"Invalid proactive_schedule_times entry {raw!r}") from exc
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError(f"Invalid proactive_schedule_times entry {raw!r}; hour 0–23, minute 0–59")
+            out.append(f"{h:02d}:{m:02d}")
+        return out
+
+    @field_validator("proactive_schedule_interval_minutes")
+    @classmethod
+    def _validate_schedule_interval(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        try:
+            iv = int(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("proactive_schedule_interval_minutes must be an integer or null") from exc
+        if iv < 5 or iv > 10_080:
+            raise ValueError("proactive_schedule_interval_minutes must be between 5 and 10080 (or null)")
+        return iv
+
+    @field_validator("proactive_smart_naturalness")
+    @classmethod
+    def _normalize_smart_naturalness(cls, v: Any) -> str:
+        s = (v or "balanced").strip().lower()
+        if s not in ("off", "subtle", "balanced"):
+            return "balanced"
+        return s
+
     @model_validator(mode="before")
     @classmethod
-    def _migrate_legacy_local_timezone(cls, data: Any) -> Any:
+    def _config_before(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        lt = data.get("local_timezone")
-        legacy = data.get("proactive_quiet_hours_timezone")
+        d = dict(data)
+        lt = d.get("local_timezone")
+        legacy = d.get("proactive_quiet_hours_timezone")
         legacy_empty = legacy is None or (isinstance(legacy, str) and not legacy.strip())
         lt_empty = lt is None or (isinstance(lt, str) and not str(lt).strip())
         if lt_empty and not legacy_empty and isinstance(legacy, str):
-            merged = {**data}
-            merged["local_timezone"] = legacy.strip()
-            return merged
-        return data
+            d["local_timezone"] = legacy.strip()
+        pm = d.get("proactive_mode")
+        pm_missing = pm is None or (isinstance(pm, str) and not str(pm).strip())
+        if pm_missing:
+            d["proactive_mode"] = "smart" if d.get("proactive_enabled") else "off"
+        return d
+
+    @model_validator(mode="after")
+    def _sync_legacy_proactive_enabled(self) -> "ModelConfig":
+        object.__setattr__(self, "proactive_enabled", self.proactive_mode != "off")
+        return self
 
 
 RECOMMENDED_CHAT_MODEL = "qwen3.5:9b"

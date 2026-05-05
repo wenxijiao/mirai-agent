@@ -69,6 +69,7 @@ def test_config_cli_writes_full_config(monkeypatch, tmp_path, capsys):
     cli.main()
 
     saved = json.loads(p.read_text(encoding="utf-8"))
+    assert saved["proactive_mode"] == "off"
     assert saved["proactive_enabled"] is False
     assert saved["proactive_quiet_hours"] == "00:30-08:30"
     assert saved["local_timezone"] is None

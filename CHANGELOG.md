@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Proactive messaging modes**: `proactive_mode` (`off` | `smart` | `scheduled`) with `proactive_schedule_times`, `proactive_schedule_interval_minutes`, and `proactive_schedule_require_idle`. Legacy JSON without `proactive_mode` derives mode from `proactive_enabled`; `proactive_enabled` is still saved and synced from mode on load. Environment: `MIRAI_PROACTIVE_MODE`, `MIRAI_PROACTIVE_SCHEDULE_TIMES`, `MIRAI_PROACTIVE_SCHEDULE_INTERVAL_MINUTES`, `MIRAI_PROACTIVE_SCHEDULE_REQUIRE_IDLE`.
 - **`local_timezone`** in `config.json`: IANA zone for user-facing wall time (chat clock, proactive context, proactive quiet hours, proactive daily limit calendar). Legacy JSON key `proactive_quiet_hours_timezone` is still read on load; prefer **`MIRAI_LOCAL_TIMEZONE`** over `MIRAI_PROACTIVE_QUIET_HOURS_TIMEZONE` at runtime.
 - Proactive messaging: `proactive_check_interval_jitter_ratio`, `proactive_unreplied_escalation_jitter_ratio`, and `proactive_check_in_probability` for less rigid scheduling; matching `MIRAI_PROACTIVE_*` environment variables.
 

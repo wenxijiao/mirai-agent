@@ -76,7 +76,21 @@ def load_model_config() -> ModelConfig:
     config.edge_tools_enable_dynamic_routing = _env_bool(
         "MIRAI_EDGE_TOOLS_DYNAMIC_ROUTING", config.edge_tools_enable_dynamic_routing
     )
-    config.proactive_enabled = _env_bool("MIRAI_PROACTIVE_ENABLED", config.proactive_enabled)
+    mode_from_env = False
+    pm_env = os.getenv("MIRAI_PROACTIVE_MODE")
+    if pm_env and str(pm_env).strip():
+        s = pm_env.strip().lower()
+        if s in ("off", "smart", "scheduled"):
+            config.proactive_mode = s
+            mode_from_env = True
+
+    enabled_env_set = os.getenv("MIRAI_PROACTIVE_ENABLED")
+    if enabled_env_set is not None and str(enabled_env_set).strip():
+        config.proactive_enabled = _env_bool("MIRAI_PROACTIVE_ENABLED", config.proactive_enabled)
+        if not mode_from_env:
+            config.proactive_mode = "smart" if config.proactive_enabled else "off"
+    else:
+        config.proactive_enabled = _env_bool("MIRAI_PROACTIVE_ENABLED", config.proactive_enabled)
 
     edge_limit = os.getenv("MIRAI_EDGE_TOOLS_RETRIEVAL_LIMIT")
     if edge_limit:
@@ -167,6 +181,20 @@ def load_model_config() -> ModelConfig:
     proactive_tone = os.getenv("MIRAI_PROACTIVE_TONE_INTENSITY")
     if proactive_tone and proactive_tone.strip():
         config.proactive_tone_intensity = proactive_tone.strip()
+    proactive_smart_naturalness = os.getenv("MIRAI_PROACTIVE_SMART_NATURALNESS")
+    if proactive_smart_naturalness and proactive_smart_naturalness.strip():
+        config.proactive_smart_naturalness = ModelConfig.model_validate(
+            {**config.model_dump(), "proactive_smart_naturalness": proactive_smart_naturalness.strip()}
+        ).proactive_smart_naturalness
+    proactive_smart_max_followups = os.getenv("MIRAI_PROACTIVE_SMART_MAX_UNREPLIED_FOLLOWUPS")
+    if proactive_smart_max_followups and proactive_smart_max_followups.strip():
+        try:
+            config.proactive_smart_max_unreplied_followups = max(
+                1,
+                min(20, int(proactive_smart_max_followups.strip())),
+            )
+        except ValueError:
+            pass
     local_tz = os.getenv("MIRAI_LOCAL_TIMEZONE")
     if local_tz and local_tz.strip():
         config.local_timezone = local_tz.strip()
@@ -196,6 +224,31 @@ def load_model_config() -> ModelConfig:
         except ValueError:
             pass
 
+    proactive_sched_times = os.getenv("MIRAI_PROACTIVE_SCHEDULE_TIMES")
+    if proactive_sched_times and proactive_sched_times.strip():
+        times = [p.strip() for p in proactive_sched_times.split(",") if p.strip()]
+        if times:
+            try:
+                config.proactive_schedule_times = ModelConfig.model_validate(
+                    {**config.model_dump(), "proactive_schedule_times": times}
+                ).proactive_schedule_times
+            except Exception:
+                pass
+    proactive_sched_interval = os.getenv("MIRAI_PROACTIVE_SCHEDULE_INTERVAL_MINUTES")
+    if proactive_sched_interval and proactive_sched_interval.strip():
+        try:
+            iv = int(proactive_sched_interval.strip())
+            if 5 <= iv <= 10_080:
+                config.proactive_schedule_interval_minutes = iv
+        except ValueError:
+            pass
+    sched_idle = os.getenv("MIRAI_PROACTIVE_SCHEDULE_REQUIRE_IDLE")
+    if sched_idle is not None and str(sched_idle).strip():
+        config.proactive_schedule_require_idle = _env_bool(
+            "MIRAI_PROACTIVE_SCHEDULE_REQUIRE_IDLE",
+            config.proactive_schedule_require_idle,
+        )
+
     stt_provider = os.getenv("MIRAI_STT_PROVIDER")
     if stt_provider:
         config.stt_provider = stt_provider.strip() or config.stt_provider
@@ -211,6 +264,8 @@ def load_model_config() -> ModelConfig:
     stt_language = os.getenv("MIRAI_STT_LANGUAGE")
     if stt_language:
         config.stt_language = stt_language.strip() or config.stt_language
+
+    config.proactive_enabled = config.proactive_mode != "off"
 
     return config
 

@@ -216,3 +216,78 @@ def write_provider_failure_diagnostic(
     except Exception:
         _logger.debug("Failed to write provider request diagnostic", exc_info=True)
         return None
+
+
+def write_chat_loop_diagnostic(
+    *,
+    session_id: str,
+    prompt: str | None,
+    model: str | None,
+    loop_count: int,
+    messages: list[dict[str, Any]],
+    tools: list[dict] | None,
+    extra: dict[str, Any] | None = None,
+) -> str | None:
+    """Write a debug snapshot when chat tool execution loops are stopped."""
+    return write_chat_diagnostic(
+        phase="chat_tool_loop",
+        session_id=session_id,
+        prompt=prompt,
+        model=model,
+        messages=messages,
+        tools=tools,
+        extra={"loop_count": loop_count, **(extra or {})},
+    )
+
+
+def write_chat_diagnostic(
+    *,
+    phase: str,
+    session_id: str,
+    prompt: str | None,
+    model: str | None,
+    messages: list[dict[str, Any]],
+    tools: list[dict] | None,
+    error: BaseException | None = None,
+    extra: dict[str, Any] | None = None,
+) -> str | None:
+    """Write a debug snapshot for non-provider chat pipeline failures."""
+    try:
+        directory = debug_dir()
+        os.makedirs(directory, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        model_tag = _safe_filename_token(model or "unknown-model", max_len=40, fallback="model")
+        session_tag = _safe_filename_token(session_id or "session", max_len=32, fallback="session")
+        phase_tag = _safe_filename_token(phase or "chat", max_len=32, fallback="chat")
+        unique = uuid4().hex[:8]
+        path = os.path.join(directory, f"{stamp}_{phase_tag}_{model_tag}_{session_tag}_{unique}.json")
+        payload: dict[str, Any] = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "phase": phase,
+            "session_id": session_id,
+            "model": model,
+            "prompt_preview": short_text(prompt, limit=2000),
+            "counts": {
+                "messages": len(messages),
+                "tools": len(tools or []),
+            },
+            "messages": [summarize_openai_message(m) for m in messages],
+            "tools": summarize_tools(tools),
+        }
+        if error is not None:
+            payload["error"] = {
+                "type": type(error).__name__,
+                "message": str(error),
+                "repr": repr(error),
+                "traceback": traceback.format_exception(type(error), error, error.__traceback__),
+            }
+        if extra and "loop_count" in extra:
+            payload["loop_count"] = extra["loop_count"]
+        if extra:
+            payload["extra"] = extra
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        return path
+    except Exception:
+        _logger.debug("Failed to write chat diagnostic", exc_info=True)
+        return None

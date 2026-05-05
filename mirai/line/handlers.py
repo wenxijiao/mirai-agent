@@ -758,7 +758,7 @@ async def handle_line_postback_event(
         prompt = (
             f"[Timer expired — scheduled action]\n"
             f"Planned task: {description}\n"
-            f"Now execute it: call tools as needed, then answer the user in the same language."
+            f"Now execute it: use currently available tools only when needed, then answer the user in the same language."
         )
         line_uid = user_id
         accumulated: list[str] = []

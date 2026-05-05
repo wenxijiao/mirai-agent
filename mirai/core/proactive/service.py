@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from mirai.core.config import load_model_config
+from mirai.core.proactive.interaction import smart_interaction
 from mirai.core.proactive.planner import decide_proactive_send
 from mirai.core.proactive.prompt import build_proactive_prompt, split_proactive_messages
 from mirai.core.proactive.state import ProactiveStateStore
@@ -57,7 +58,7 @@ class ProactiveMessageService:
     async def run(self) -> None:
         while not self._stop.is_set():
             cfg = load_model_config()
-            if cfg.proactive_enabled:
+            if cfg.proactive_mode != "off":
                 for session_id in list(cfg.proactive_session_ids):
                     try:
                         await self._maybe_send_for_session(session_id, cfg=cfg)
@@ -93,7 +94,10 @@ class ProactiveMessageService:
             context = await proactive_context_lines()
             prompt = build_proactive_prompt(cfg, state, decision, now=now, context_lines=context)
             text = await self._generate_text(session_id=session_id, prompt=prompt)
-            parts = split_proactive_messages(text)
+            interaction = None
+            if (cfg.proactive_mode or "").strip().lower() == "smart":
+                interaction = smart_interaction(cfg, state, trigger=decision.trigger)
+            parts = split_proactive_messages(text, max_parts=interaction.max_messages if interaction else 3)
             if not parts:
                 return
 
@@ -102,12 +106,24 @@ class ProactiveMessageService:
             sent_any = False
             for idx, part in enumerate(parts):
                 if idx:
-                    await asyncio.sleep(random.uniform(0.7, 1.8))
+                    if interaction and interaction.state in ("waiting", "light_nudge"):
+                        delay = random.uniform(1.4, 3.4)
+                    elif interaction and interaction.state in ("reserved", "give_space"):
+                        delay = random.uniform(0.9, 1.4)
+                    else:
+                        delay = random.uniform(0.7, 1.8)
+                    await asyncio.sleep(delay)
                 sent = await send_text_to_telegram(session_id, part)
                 sent_any = sent_any or sent
             if sent_any:
                 self.bot.session_memory(session_id).add_message("assistant", "\n\n".join(parts))
-                self.state_store.record_sent(session_id, trigger=decision.trigger or "check_in", at=now)
+                self.state_store.record_sent(
+                    session_id,
+                    trigger=decision.trigger or "check_in",
+                    at=now,
+                    scheduled_slot_key=decision.scheduled_slot_key,
+                    mark_scheduled_interval=decision.mark_scheduled_interval,
+                )
 
     async def _generate_text(self, *, session_id: str, prompt: str) -> str:
         memory = self.bot.session_memory(session_id)

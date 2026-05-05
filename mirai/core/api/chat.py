@@ -36,6 +36,7 @@ from mirai.core.plugins import (
     get_quota_policy,
     get_session_scope,
 )
+from mirai.core.providers.diagnostics import write_chat_diagnostic, write_chat_loop_diagnostic
 from mirai.core.tool import TOOL_REGISTRY, execute_registered_tool
 from mirai.core.tool_call_normalize import normalize_tool_calls, tool_call_format_retry_user_content
 from mirai.core.tool_routing import record_tool_routing_usage, select_tool_schemas
@@ -127,6 +128,29 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
     total_completion_tokens = 0
     usage_model = ""
     active_bot = None
+    ephemeral_messages = []
+    active_edge_tool_names: set[str] = set()
+    loop_count = 0
+    last_tools: list | None = None
+    tool_loop_events: list[dict] = []
+
+    def _write_chat_debug(phase: str, *, error: BaseException | None = None, extra: dict | None = None) -> str | None:
+        return write_chat_diagnostic(
+            phase=phase,
+            session_id=session_id,
+            prompt=prompt,
+            model=active_bot.model_name if active_bot is not None else None,
+            messages=ephemeral_messages,
+            tools=last_tools,
+            error=error,
+            extra={
+                "loop_count": loop_count,
+                "active_edge_tool_names": sorted(active_edge_tool_names),
+                "tool_loop_events": tool_loop_events[-80:],
+                **(extra or {}),
+            },
+        )
+
     try:
         lock = get_session_lock(session_id)
         await lock.acquire()
@@ -143,17 +167,39 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
             active_bot = await get_bot_pool().get_bot_for_session_owner(owner_uid)
             current_prompt = prompt
             routing_query = prompt
-            ephemeral_messages = []
-            active_edge_tool_names: set[str] = set()
-            loop_count = 0
             tool_format_retries = 0
 
             while True:
                 loop_count += 1
                 if loop_count > MAX_TOOL_LOOPS:
+                    diag_path = write_chat_loop_diagnostic(
+                        session_id=session_id,
+                        prompt=prompt,
+                        model=active_bot.model_name if active_bot is not None else None,
+                        loop_count=loop_count - 1,
+                        messages=ephemeral_messages,
+                        tools=last_tools,
+                        extra={
+                            "reason": "maximum_tool_execution_iterations",
+                            "max_tool_loops": MAX_TOOL_LOOPS,
+                            "active_edge_tool_names": sorted(active_edge_tool_names),
+                            "tool_loop_events": tool_loop_events[-80:],
+                        },
+                    )
+                    if diag_path:
+                        _chat_log.error(
+                            "Maximum tool execution iterations reached session_id=%s diagnostic=%s",
+                            session_id,
+                            diag_path,
+                        )
+                    else:
+                        _chat_log.error("Maximum tool execution iterations reached session_id=%s", session_id)
+                    content = "System: Maximum tool execution iterations reached. Stopping to prevent infinite loops."
+                    if diag_path:
+                        content += f" Diagnostic saved to: {diag_path}"
                     yield {
                         "type": "error",
-                        "content": "System: Maximum tool execution iterations reached. Stopping to prevent infinite loops.",
+                        "content": content,
                     }
                     break
                 ident = get_current_identity()
@@ -172,6 +218,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     all_tools = get_all_tool_schemas(ident)
                 if timer_callback:
                     all_tools = _exclude_delay_scheduling_tools(all_tools)
+                last_tools = all_tools
                 stream = active_bot.chat_stream(
                     prompt=current_prompt,
                     session_id=session_id,
@@ -206,13 +253,40 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                 tcalls = normalize_tool_calls(tool_calls_to_process)
                 if not tcalls:
                     tool_format_retries += 1
+                    tool_loop_events.append(
+                        {
+                            "loop": loop_count,
+                            "status": "error",
+                            "reason": "invalid_tool_call_format",
+                            "raw_preview": _summarize_tool_args({"tool_calls": tool_calls_to_process}, max_len=1000),
+                        }
+                    )
                     if tool_format_retries > MAX_TOOL_CALL_FORMAT_RETRIES:
+                        diag_path = _write_chat_debug(
+                            "chat_tool_call_format",
+                            extra={
+                                "reason": "max_tool_call_format_retries",
+                                "max_tool_call_format_retries": MAX_TOOL_CALL_FORMAT_RETRIES,
+                                "raw_tool_calls_preview": _summarize_tool_args(
+                                    {"tool_calls": tool_calls_to_process},
+                                    max_len=2000,
+                                ),
+                            },
+                        )
+                        content = (
+                            "Model returned tool_calls that could not be parsed into a usable format "
+                            f"after {MAX_TOOL_CALL_FORMAT_RETRIES} automatic re-tries."
+                        )
+                        if diag_path:
+                            _chat_log.error(
+                                "Tool call format retries exhausted session_id=%s diagnostic=%s",
+                                session_id,
+                                diag_path,
+                            )
+                            content += f" Diagnostic saved to: {diag_path}"
                         yield {
                             "type": "error",
-                            "content": (
-                                "Model returned tool_calls that could not be parsed into a usable format "
-                                f"after {MAX_TOOL_CALL_FORMAT_RETRIES} automatic re-tries."
-                            ),
+                            "content": content,
                         }
                         break
                     ephemeral_messages.append(
@@ -253,6 +327,15 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                 error_msg = (
                                     f"Error: Invalid JSON in arguments for tool '{raw_call_name}'. "
                                     f"Raw input: {args!r}. Please retry with valid JSON."
+                                )
+                                tool_loop_events.append(
+                                    {
+                                        "loop": loop_count,
+                                        "tool": raw_call_name,
+                                        "status": "error",
+                                        "reason": "invalid_json_arguments",
+                                        "detail": str(args)[:1000],
+                                    }
                                 )
                                 ephemeral_messages.append({"role": "tool", "content": error_msg, "name": raw_call_name})
                                 yield {
@@ -305,6 +388,16 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             ephemeral_messages.append(
                                 {"role": "tool", "content": f"Error: {err_detail}", "name": raw_call_name}
                             )
+                            tool_loop_events.append(
+                                {
+                                    "loop": loop_count,
+                                    "tool": raw_call_name,
+                                    "resolved_tool": func_name,
+                                    "status": "error",
+                                    "reason": "tool_not_registered_or_edge_offline",
+                                    "detail": err_detail,
+                                }
+                            )
                             yield {"type": "tool_status", "status": "error", "content": err_detail}
                             continue
 
@@ -322,6 +415,16 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                 "status": "error",
                                 "content": f"Edge device '{target_edge}' went offline before tool execution started.",
                             }
+                            tool_loop_events.append(
+                                {
+                                    "loop": loop_count,
+                                    "tool": raw_call_name,
+                                    "resolved_tool": func_name,
+                                    "status": "error",
+                                    "reason": "edge_device_went_offline",
+                                    "edge": target_edge,
+                                }
+                            )
                             continue
 
                         entry["kind"] = "edge"
@@ -381,6 +484,14 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     if decision == "deny":
                         ephemeral_messages.append(
                             {"role": "tool", "content": "Tool execution was denied by the user.", "name": fn}
+                        )
+                        tool_loop_events.append(
+                            {
+                                "loop": loop_count,
+                                "tool": fn,
+                                "status": "denied",
+                                "reason": "user_denied_confirmation",
+                            }
                         )
                         yield {
                             "type": "tool_status",
@@ -544,6 +655,17 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                 for entry, r in zip(prepared, results):
                     fn = r["func_name"]
                     tool_nm = entry.get("tool_message_name", fn)
+                    tool_loop_events.append(
+                        {
+                            "loop": loop_count,
+                            "tool": tool_nm,
+                            "resolved_tool": fn,
+                            "kind": entry.get("kind"),
+                            "edge": entry.get("target_edge"),
+                            "status": r.get("status", "error"),
+                            "result_preview": str(r.get("result", ""))[:1000],
+                        }
+                    )
                     if r["status"] == "success":
                         label = fn
                         if "original_tool_name" in r:
@@ -561,7 +683,22 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             label = f"'{r['original_tool_name']}' on '{r['target_edge']}'"
                         else:
                             label = f"'{fn}'"
-                        yield {"type": "tool_status", "status": "error", "content": f"Tool {label} failed."}
+                        diag_path = _write_chat_debug(
+                            "chat_tool_execution",
+                            extra={
+                                "reason": "tool_execution_failed",
+                                "failed_tool": tool_nm,
+                                "resolved_tool": fn,
+                                "tool_kind": entry.get("kind"),
+                                "edge": entry.get("target_edge"),
+                                "arguments_preview": _summarize_tool_args(entry.get("args"), max_len=2000),
+                                "result_preview": str(r.get("result", ""))[:2000],
+                            },
+                        )
+                        content = f"Tool {label} failed."
+                        if diag_path:
+                            content += f" Diagnostic saved to: {diag_path}"
+                        yield {"type": "tool_status", "status": "error", "content": content}
 
                     ephemeral_messages.append({"role": "tool", "content": r["result"], "name": tool_nm})
 
@@ -569,11 +706,15 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
             current_prompt = None
 
         except Exception as exc:
-            _chat_log.exception("Chat pipeline failed session_id=%s", session_id)
+            diag_path = _write_chat_debug("chat_pipeline_failed", error=exc, extra={"reason": "exception"})
+            _chat_log.exception("Chat pipeline failed session_id=%s diagnostic=%s", session_id, diag_path)
+            content = f"Chat request failed: {exc}"
+            if diag_path:
+                content += f" Diagnostic saved to: {diag_path}"
             yield {
                 "type": "error",
                 "code": "MIRAI_CHAT_PIPELINE_FAILED",
-                "content": f"Chat request failed: {exc}",
+                "content": content,
             }
         finally:
             try:

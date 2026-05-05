@@ -11,6 +11,15 @@ _PRESETS = {
         "Use a warm companion style that matches the active persona. You may express care, missing the user, "
         "or mild disappointment when they have not replied, but do not pressure or guilt-trip them."
     ),
+    "natural": (
+        "Use a natural proactive style that adapts to the active system prompt. Sound like the configured role is "
+        "sending a normal chat message, not an automated reminder. Keep any attitude shifts role-appropriate."
+    ),
+    "adaptive": (
+        "Use an adaptive proactive style. Let the active system prompt decide the relationship and tone: a tutor can "
+        "gently prompt, a coach can check accountability, an assistant can follow up professionally, and a companion "
+        "can be warmer. Do not assume intimacy by default."
+    ),
     "tutor": (
         "Use a proactive tutor style. Focus on study progress, homework, review, and small next steps. "
         "If the user has not replied, become more structured rather than emotional."

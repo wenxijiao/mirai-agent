@@ -45,6 +45,8 @@ class ProactiveSessionState:
     last_user_message_at: str | None = None
     last_trigger: str | None = None
     unreplied_count: int = 0
+    last_scheduled_slot: str | None = None
+    last_scheduled_interval_at: str | None = None
 
 
 class ProactiveStateStore:
@@ -85,6 +87,8 @@ class ProactiveStateStore:
             last_user_message_at=raw.get("last_user_message_at") or None,
             last_trigger=raw.get("last_trigger") or None,
             unreplied_count=int(raw.get("unreplied_count") or 0),
+            last_scheduled_slot=raw.get("last_scheduled_slot") or None,
+            last_scheduled_interval_at=raw.get("last_scheduled_interval_at") or None,
         )
 
     def put(self, state: ProactiveSessionState) -> None:
@@ -99,7 +103,15 @@ class ProactiveStateStore:
         state.unreplied_count = 0
         self.put(state)
 
-    def record_sent(self, session_id: str, *, trigger: str, at: datetime | None = None) -> None:
+    def record_sent(
+        self,
+        session_id: str,
+        *,
+        trigger: str,
+        at: datetime | None = None,
+        scheduled_slot_key: str | None = None,
+        mark_scheduled_interval: bool = False,
+    ) -> None:
         now = (at or utc_now()).astimezone(timezone.utc)
         cfg = load_model_config()
         today = proactive_calendar_date_iso(now, cfg.local_timezone)
@@ -111,6 +123,10 @@ class ProactiveStateStore:
         state.last_proactive_at = now.isoformat()
         state.last_trigger = trigger
         state.unreplied_count += 1
+        if scheduled_slot_key:
+            state.last_scheduled_slot = scheduled_slot_key
+        if mark_scheduled_interval:
+            state.last_scheduled_interval_at = now.isoformat()
         self.put(state)
 
 

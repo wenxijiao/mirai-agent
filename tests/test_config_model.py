@@ -55,6 +55,12 @@ def test_model_config_local_timezone_wins_over_legacy_key_in_json():
     assert cfg.local_timezone == "Europe/London"
 
 
+def test_model_config_explicit_proactive_mode_overrides_legacy_enabled():
+    cfg = ModelConfig.model_validate({"proactive_enabled": True, "proactive_mode": "off"})
+    assert cfg.proactive_mode == "off"
+    assert cfg.proactive_enabled is False
+
+
 def test_full_config_file_writes_all_default_keys(monkeypatch, tmp_path):
     p = tmp_path / "config.json"
     p.write_text(json.dumps({"chat_model": "m"}), encoding="utf-8")
@@ -66,7 +72,11 @@ def test_full_config_file_writes_all_default_keys(monkeypatch, tmp_path):
 
     assert cfg.chat_model == "m"
     assert saved["chat_model"] == "m"
+    assert saved["proactive_mode"] == "off"
     assert saved["proactive_enabled"] is False
+    assert saved.get("proactive_schedule_times") == []
+    assert saved.get("proactive_schedule_interval_minutes") is None
+    assert saved.get("proactive_schedule_require_idle") is True
     assert saved["proactive_check_interval_seconds"] == 900
     assert saved["local_timezone"] is None
     assert saved["proactive_check_interval_jitter_ratio"] == 0.15

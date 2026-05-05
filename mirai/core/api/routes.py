@@ -144,7 +144,7 @@ async def lifespan(app: FastAPI):
     _state.bot = MiraiBot(provider=chat_provider, model_name=config.chat_model, think=False)
     await _state.bot.warm_up()
 
-    if config.proactive_enabled:
+    if config.proactive_mode != "off":
         from mirai.core.proactive.service import ProactiveMessageService
 
         _state.proactive_service = ProactiveMessageService(_state.bot)

@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Literal
 from mirai.core.proactive.timezone_utils import format_user_facing_time
 from mirai.core.prompts.defaults import (
     NO_VISION_IMAGE_UPLOAD_INSTRUCTION,
-    TOOL_USE_INSTRUCTION,
     UPLOAD_FILE_INSTRUCTION,
+    build_tool_use_instruction,
 )
 
 if TYPE_CHECKING:
@@ -150,7 +150,7 @@ def compose_messages(
             line = format_user_facing_time(datetime.now(timezone.utc), cfg.local_timezone)
             extra_parts.append(f"\n\n[Current Time] {line}")
         if tools and cfg.chat_append_tool_use_instruction:
-            extra_parts.append(TOOL_USE_INSTRUCTION)
+            extra_parts.append(build_tool_use_instruction(tools))
         if tools and prompt and _UPLOAD_PATH_RE.search(prompt):
             if upload_mode == "vision":
                 extra_parts.append(UPLOAD_FILE_INSTRUCTION)
