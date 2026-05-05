@@ -7,6 +7,7 @@ import uuid
 
 from json_repair import repair_json
 from mirai.core.api.chat_context import reset_chat_owner_user_id, set_chat_owner_user_id
+from mirai.core.api import chat_debug_trace
 from mirai.core.api.edge import _push_confirmation_policy_to_edge_peer, persist_local_tool_confirmation_to_config
 from mirai.core.api.state import (
     ACTIVE_CONNECTIONS,
@@ -134,6 +135,11 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
     last_tools: list | None = None
     tool_loop_events: list[dict] = []
 
+    def _out(ev: dict) -> dict:
+        if chat_debug_trace.is_tracing(session_id):
+            chat_debug_trace.append_stream_event(session_id, ev)
+        return ev
+
     def _write_chat_debug(phase: str, *, error: BaseException | None = None, extra: dict | None = None) -> str | None:
         return write_chat_diagnostic(
             phase=phase,
@@ -157,14 +163,23 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
         try:
             ident = get_current_identity()
             if ident.user_id not in (SINGLE_USER_ID, owner_uid):
-                yield {
-                    "type": "error",
-                    "code": "FORBIDDEN",
-                    "content": "Session does not belong to the current user",
-                }
+                yield _out(
+                    {
+                        "type": "error",
+                        "code": "FORBIDDEN",
+                        "content": "Session does not belong to the current user",
+                    }
+                )
                 return
 
             active_bot = await get_bot_pool().get_bot_for_session_owner(owner_uid)
+            if chat_debug_trace.is_tracing(session_id):
+                chat_debug_trace.append_turn_begin(
+                    session_id,
+                    prompt=prompt,
+                    think=think,
+                    timer_callback=timer_callback,
+                )
             current_prompt = prompt
             routing_query = prompt
             tool_format_retries = 0
@@ -197,10 +212,12 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     content = "System: Maximum tool execution iterations reached. Stopping to prevent infinite loops."
                     if diag_path:
                         content += f" Diagnostic saved to: {diag_path}"
-                    yield {
-                        "type": "error",
-                        "content": content,
-                    }
+                    yield _out(
+                        {
+                            "type": "error",
+                            "content": content,
+                        }
+                    )
                     break
                 ident = get_current_identity()
                 try:
@@ -236,12 +253,14 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                         total_completion_tokens += int(chunk.get("completion_tokens", 0) or 0)
                         if chunk.get("model"):
                             usage_model = str(chunk["model"])
+                        if chat_debug_trace.is_tracing(session_id):
+                            chat_debug_trace.append_record(session_id, {"kind": "provider_usage", "usage": dict(chunk)})
                         continue
                     if chunk["type"] == "text":
                         streamed_text_before_tools += chunk["content"]
-                        yield {"type": "text", "content": chunk["content"]}
+                        yield _out({"type": "text", "content": chunk["content"]})
                     elif chunk["type"] == "thought":
-                        yield {"type": "thought", "content": chunk["content"]}
+                        yield _out({"type": "thought", "content": chunk["content"]})
                     elif chunk["type"] == "tool_call":
                         tool_calls_to_process = chunk["tool_calls"]
                         break
@@ -284,10 +303,12 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                 diag_path,
                             )
                             content += f" Diagnostic saved to: {diag_path}"
-                        yield {
-                            "type": "error",
-                            "content": content,
-                        }
+                        yield _out(
+                            {
+                                "type": "error",
+                                "content": content,
+                            }
+                        )
                         break
                     ephemeral_messages.append(
                         {
@@ -295,14 +316,16 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             "content": tool_call_format_retry_user_content(tool_calls_to_process),
                         }
                     )
-                    yield {
-                        "type": "tool_status",
-                        "status": "error",
-                        "content": (
-                            f"Tool call format invalid (attempt {tool_format_retries}/"
-                            f"{MAX_TOOL_CALL_FORMAT_RETRIES}); asking the model to regenerate."
-                        ),
-                    }
+                    yield _out(
+                        {
+                            "type": "tool_status",
+                            "status": "error",
+                            "content": (
+                                f"Tool call format invalid (attempt {tool_format_retries}/"
+                                f"{MAX_TOOL_CALL_FORMAT_RETRIES}); asking the model to regenerate."
+                            ),
+                        }
+                    )
                     continue
 
                 tool_format_retries = 0
@@ -338,11 +361,13 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                     }
                                 )
                                 ephemeral_messages.append({"role": "tool", "content": error_msg, "name": raw_call_name})
-                                yield {
-                                    "type": "tool_status",
-                                    "status": "error",
-                                    "content": f"Tool '{raw_call_name}': invalid JSON arguments",
-                                }
+                                yield _out(
+                                    {
+                                        "type": "tool_status",
+                                        "status": "error",
+                                        "content": f"Tool '{raw_call_name}': invalid JSON arguments",
+                                    }
+                                )
                                 continue
 
                     func_name = _canonical_local_tool_name(raw_call_name)
@@ -398,7 +423,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                     "detail": err_detail,
                                 }
                             )
-                            yield {"type": "tool_status", "status": "error", "content": err_detail}
+                            yield _out({"type": "tool_status", "status": "error", "content": err_detail})
                             continue
 
                         peer = ACTIVE_CONNECTIONS.get(target_edge)
@@ -410,11 +435,13 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                     "name": raw_call_name,
                                 }
                             )
-                            yield {
-                                "type": "tool_status",
-                                "status": "error",
-                                "content": f"Edge device '{target_edge}' went offline before tool execution started.",
-                            }
+                            yield _out(
+                                {
+                                    "type": "tool_status",
+                                    "status": "error",
+                                    "content": f"Edge device '{target_edge}' went offline before tool execution started.",
+                                }
+                            )
                             tool_loop_events.append(
                                 {
                                     "loop": loop_count,
@@ -466,13 +493,15 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                     if entry["kind"] == "edge" and "original_tool_name" in entry:
                         display_name = entry["original_tool_name"]
 
-                    yield {
-                        "type": "tool_confirmation",
-                        "call_id": confirm_id,
-                        "tool_name": display_name,
-                        "full_tool_name": fn,
-                        "arguments": entry["args"],
-                    }
+                    yield _out(
+                        {
+                            "type": "tool_confirmation",
+                            "call_id": confirm_id,
+                            "tool_name": display_name,
+                            "full_tool_name": fn,
+                            "arguments": entry["args"],
+                        }
+                    )
 
                     try:
                         decision = await asyncio.wait_for(confirm_future, timeout=120)
@@ -493,11 +522,13 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                                 "reason": "user_denied_confirmation",
                             }
                         )
-                        yield {
-                            "type": "tool_status",
-                            "status": "error",
-                            "content": f"Tool '{display_name}' denied by user.",
-                        }
+                        yield _out(
+                            {
+                                "type": "tool_status",
+                                "status": "error",
+                                "content": f"Tool '{display_name}' denied by user.",
+                            }
+                        )
                         record_tool_trace(
                             session_id=session_id,
                             tool_name=fn,
@@ -642,13 +673,15 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             session_id,
                             _summarize_tool_args(entry.get("args")),
                         )
-                        yield {"type": "tool_status", "status": "running", "content": f"Running local tool '{fn}'..."}
+                        yield _out({"type": "tool_status", "status": "running", "content": f"Running local tool '{fn}'..."})
                     else:
-                        yield {
-                            "type": "tool_status",
-                            "status": "running",
-                            "content": f"Calling '{entry['original_tool_name']}' on edge device '{entry['target_edge']}'...",
-                        }
+                        yield _out(
+                            {
+                                "type": "tool_status",
+                                "status": "running",
+                                "content": f"Calling '{entry['original_tool_name']}' on edge device '{entry['target_edge']}'...",
+                            }
+                        )
 
                 results = await asyncio.gather(*[_timed_run_one(e) for e in prepared])
 
@@ -672,11 +705,13 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                             label = f"'{r['original_tool_name']}' on '{r['target_edge']}'"
                         else:
                             label = f"'{fn}'"
-                        yield {
-                            "type": "tool_status",
-                            "status": "success",
-                            "content": f"Tool {label} finished successfully.",
-                        }
+                        yield _out(
+                            {
+                                "type": "tool_status",
+                                "status": "success",
+                                "content": f"Tool {label} finished successfully.",
+                            }
+                        )
                     else:
                         label = fn
                         if "original_tool_name" in r:
@@ -698,7 +733,7 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
                         content = f"Tool {label} failed."
                         if diag_path:
                             content += f" Diagnostic saved to: {diag_path}"
-                        yield {"type": "tool_status", "status": "error", "content": content}
+                        yield _out({"type": "tool_status", "status": "error", "content": content})
 
                     ephemeral_messages.append({"role": "tool", "content": r["result"], "name": tool_nm})
 
@@ -711,12 +746,25 @@ async def generate_chat_events(prompt: str, session_id: str, think: bool = False
             content = f"Chat request failed: {exc}"
             if diag_path:
                 content += f" Diagnostic saved to: {diag_path}"
-            yield {
-                "type": "error",
-                "code": "MIRAI_CHAT_PIPELINE_FAILED",
-                "content": content,
-            }
+            yield _out(
+                {
+                    "type": "error",
+                    "code": "MIRAI_CHAT_PIPELINE_FAILED",
+                    "content": content,
+                }
+            )
         finally:
+            try:
+                if chat_debug_trace.is_tracing(session_id):
+                    chat_debug_trace.append_turn_end(
+                        session_id,
+                        model=active_bot.model_name if active_bot is not None else None,
+                        total_prompt_tokens=total_prompt_tokens,
+                        total_completion_tokens=total_completion_tokens,
+                        usage_model=usage_model,
+                    )
+            except Exception:
+                _chat_log.debug("chat trace turn_end skipped", exc_info=True)
             try:
                 record_tool_routing_usage(
                     session_id=session_id,

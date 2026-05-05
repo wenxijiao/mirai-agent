@@ -95,6 +95,8 @@ Speech-to-text fields:
 - `stt_model_dir`: Optional model cache directory. `null` uses Mirai's default.
 - `stt_language`: Language hint. Default: `auto`.
 
+Chat NDJSON tracing (optional): from Telegram (`/start_log` / `/end_log`), LINE, `mirai --chat`, or `PUT /config/chat-debug`, the server appends one line per JSON record to `MIRAI_DEBUG_DIR/chat_trace/<session>/....ndjson` for that qualified `session_id`. Logs may contain prompts, model output, and tool args (privacy: do not share). State is in-memory only (restart clears active tracing).
+
 ## Environment Variables
 
 ### Model & API Keys
@@ -112,6 +114,8 @@ Speech-to-text fields:
 | `DEEPSEEK_API_KEY` | DeepSeek API key (when `chat_provider` is `deepseek`) |
 | `DEEPSEEK_BASE_URL` | Optional DeepSeek API base URL (defaults to `https://api.deepseek.com`) |
 | `OLLAMA_HOST` | Ollama server URL (default `http://127.0.0.1:11434`; useful when Ollama runs on a different host or in Docker) |
+| `MIRAI_DEBUG_DIR` | Override directory for debug artifacts (default `~/.mirai/debug`; chat traces use `chat_trace/` under this) |
+| `MIRAI_CHAT_DEBUG_REDACT_IMAGE_DATA` | When `1` / `true`, inline `data:...;base64,...` image URLs inside trace NDJSON `llm_provider_request` records are replaced with short placeholders (smaller files). Does not change what is sent to the model—only what is written to disk. When chat-debug tracing is enabled for a session, traces already include the full composed provider `messages` and `tools` after `compose_messages`. |
 
 ### Server & Connection
 

@@ -60,6 +60,8 @@ Available commands:
   /transcribe <path>    Transcribe an audio file and send it as a message
   /session              Show current session ID
   /clear                Clear chat history for this session
+  /start_log            Append NDJSON chat traces under ~/.mirai/debug/chat_trace/ (server)
+  /end_log              Stop chat tracing
 """
 
 
@@ -99,6 +101,40 @@ def _handle_slash_command(user_input: str, session_id: str) -> bool:
             )
             if r.ok:
                 print("  Chat history cleared.\n")
+            else:
+                print(f"  Failed: {r.text}\n")
+        except Exception as exc:
+            print(f"  Error: {exc}\n")
+        return True
+
+    if cmd == "/start_log":
+        try:
+            r = requests.put(
+                _api_url(connection, "/config/chat-debug"),
+                headers=headers,
+                json={"session_id": session_id, "enabled": True},
+                timeout=5,
+            )
+            if r.ok:
+                p = r.json().get("trace_path") or ""
+                print(f"  Chat debug ON. Trace: {p}\n")
+            else:
+                print(f"  Failed: {r.text}\n")
+        except Exception as exc:
+            print(f"  Error: {exc}\n")
+        return True
+
+    if cmd == "/end_log":
+        try:
+            r = requests.put(
+                _api_url(connection, "/config/chat-debug"),
+                headers=headers,
+                json={"session_id": session_id, "enabled": False},
+                timeout=5,
+            )
+            if r.ok:
+                p = r.json().get("trace_path") or ""
+                print(f"  Chat debug OFF. Last trace: {p}\n" if p else "  Chat debug OFF.\n")
             else:
                 print(f"  Failed: {r.text}\n")
         except Exception as exc:

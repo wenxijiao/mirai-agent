@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
+from mirai.core.api import chat_debug_trace
 from mirai.core.config import load_model_config
 from mirai.core.config.model import ModelConfig
 from mirai.core.config.paths import CONFIG_DIR, ensure_config_dir
@@ -88,6 +89,14 @@ class MiraiBot:
             upload_mode="vision",
         )
 
+        if chat_debug_trace.is_tracing(session_id):
+            chat_debug_trace.append_llm_provider_request(
+                session_id,
+                model=self.model_name,
+                messages=messages,
+                tools=tools,
+            )
+
         use_think = think if think is not None else self.think
         full_response = ""
         full_thought = ""
@@ -153,6 +162,14 @@ class MiraiBot:
                     cfg=cfg,
                     upload_mode="no_vision",
                 )
+                if chat_debug_trace.is_tracing(session_id):
+                    chat_debug_trace.append_llm_provider_request(
+                        session_id,
+                        model=self.model_name,
+                        messages=messages_fb,
+                        tools=tools,
+                        note="text_only_fallback_after_vision_rejection",
+                    )
                 try:
                     async for chunk in _consume_stream(messages_fb):
                         yield chunk

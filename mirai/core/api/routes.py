@@ -25,6 +25,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from mirai.core.api.chat import clear_session, generate_chat_events
+from mirai.core.api.chat_debug_trace import (
+    get_trace_path,
+    is_tracing as chat_debug_is_tracing,
+    start_trace,
+    stop_trace,
+)
 from mirai.core.api.docs_middleware import DocsAccessMiddleware
 from mirai.core.api.edge import (
     apply_local_tool_confirmation_from_saved_config,
@@ -36,6 +42,7 @@ from mirai.core.api.http_errors import model_apply_failed_http, provider_not_rea
 from mirai.core.api.http_helpers import get_session_payload, get_system_prompt_payload
 from mirai.core.api.peers import LocalEdgePeer
 from mirai.core.api.schemas import (
+    ChatDebugRequest,
     ChatRequest,
     FileUploadRequest,
     MemoryCreateRequest,
@@ -282,6 +289,23 @@ async def timer_events_endpoint(identity: CurrentIdentity):
 async def clear_endpoint(identity: CurrentIdentity, session_id: str = "default"):
     sid = get_session_scope().qualify_session_http(identity, session_id)
     return await clear_session(sid)
+
+
+@app.put("/config/chat-debug")
+async def put_chat_debug_endpoint(identity: CurrentIdentity, body: ChatDebugRequest):
+    sid = get_session_scope().qualify_session_http(identity, body.session_id)
+    if body.enabled:
+        path = start_trace(sid)
+        return {"status": "success", "enabled": True, "trace_path": path}
+    path = stop_trace(sid)
+    return {"status": "success", "enabled": False, "trace_path": path or ""}
+
+
+@app.get("/config/chat-debug")
+async def get_chat_debug_endpoint(identity: CurrentIdentity, session_id: str = "default"):
+    sid = get_session_scope().qualify_session_http(identity, session_id)
+    p = get_trace_path(sid)
+    return {"enabled": chat_debug_is_tracing(sid), "trace_path": p or ""}
 
 
 @app.post("/uploads")

@@ -127,6 +127,23 @@ async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> 
         return True, ""
 
 
+async def _put_chat_debug(
+    connection: ConnectionConfig, session_id: str, enabled: bool
+) -> tuple[bool, str, dict | None]:
+    url = _api_url(connection, "/config/chat-debug")
+    headers = connection.auth_headers()
+    headers["Content-Type"] = "application/json"
+    timeout = httpx.Timeout(10.0, read=30.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.put(url, json={"session_id": session_id, "enabled": enabled}, headers=headers)
+        if r.status_code >= 400:
+            return False, r.text[:500], None
+        try:
+            return True, "", r.json()
+        except Exception:
+            return True, "", None
+
+
 async def _transcribe_audio_bytes(
     line_user_id: str,
     *,
@@ -418,6 +435,8 @@ async def handle_line_message_event(
                 "Commands:\n"
                 "/clear — clear this session\n"
                 "/model — view or switch model\n"
+                "/start_log — debug: log this session's chat to ~/.mirai/debug/chat_trace/\n"
+                "/end_log — stop debug logging\n"
                 "/system — session system prompt (see /system help)\n"
                 "/help — this message"
             )
@@ -428,6 +447,30 @@ async def handle_line_message_event(
                 await reply_text("Session cleared.")
             else:
                 await reply_text(f"Failed to clear session: {err}")
+            return
+        if lower.startswith("/start_log"):
+            ok, err, data = await _put_chat_debug(connection, session_id, True)
+            if ok:
+                p = (data or {}).get("trace_path") or ""
+                await reply_text(
+                    "Chat debug ON.\n"
+                    f"Trace: {p}\n"
+                    "Trace includes full LLM requests (messages + tools). Optional: MIRAI_CHAT_DEBUG_REDACT_IMAGE_DATA=1 shortens logged image data URLs.\n"
+                    "Send /end_log to stop."
+                )
+            else:
+                await reply_text(f"Failed to start debug: {err}")
+            return
+        if lower.startswith("/end_log"):
+            ok, err, data = await _put_chat_debug(connection, session_id, False)
+            if not ok:
+                await reply_text(f"Failed to end debug: {err}")
+                return
+            p = (data or {}).get("trace_path") or ""
+            if p:
+                await reply_text(f"Chat debug OFF.\nLast trace:\n{p}")
+            else:
+                await reply_text("Chat debug was not active.")
             return
         if lower.startswith("/model"):
             cfg = await _get_model_dict(user_id, use_http=use_http)

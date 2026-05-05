@@ -97,6 +97,23 @@ async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> 
         return True, ""
 
 
+async def _put_chat_debug(
+    connection: ConnectionConfig, session_id: str, enabled: bool
+) -> tuple[bool, str, dict | None]:
+    url = _api_url(connection, "/config/chat-debug")
+    headers = connection.auth_headers()
+    headers["Content-Type"] = "application/json"
+    timeout = httpx.Timeout(10.0, read=30.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.put(url, json={"session_id": session_id, "enabled": enabled}, headers=headers)
+        if r.status_code >= 400:
+            return False, r.text[:500], None
+        try:
+            return True, "", r.json()
+        except Exception:
+            return True, "", None
+
+
 async def _post_stt_transcribe(
     connection: ConnectionConfig,
     *,
@@ -179,6 +196,8 @@ def build_application():
             "/model — show server model config\n"
             "/system — view or change this chat's system prompt (not global)\n"
             "/link — bind this Telegram account to your Mirai user (multi-tenant)\n"
+            "/start_log — write full chat traces to ~/.mirai/debug/chat_trace/ (this session)\n"
+            "/end_log — stop chat tracing\n"
             "/help — this message"
         )
 
@@ -197,6 +216,45 @@ def build_application():
             await update.message.reply_text("Session cleared.")
         else:
             await update.message.reply_text(_truncate_for_telegram(f"Failed to clear: {err}"))
+
+    async def start_log_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id if update.effective_user else None):
+            await update.message.reply_text("You are not authorized to use this bot.")
+            return
+        uid = update.effective_user.id
+        session_id = _session_id_for_user(uid)
+        connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
+        ok, err, data = await _put_chat_debug(connection, session_id, True)
+        if not ok:
+            await update.message.reply_text(_truncate_for_telegram(f"Failed to start debug log: {err}"))
+            return
+        path = (data or {}).get("trace_path") or ""
+        await update.message.reply_text(
+            _truncate_for_telegram(
+                "Chat debug logging ON for this session.\n"
+                f"Trace file: {path}\n"
+                "Logs include turn boundaries, each full LLM request (messages + tools), and stream events.\n"
+                "Optional: set MIRAI_CHAT_DEBUG_REDACT_IMAGE_DATA=1 on the server to shorten inline data-URL images in the trace file only.\n"
+                "Send /end_log to stop."
+            )
+        )
+
+    async def end_log_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _authorized(update.effective_user.id if update.effective_user else None):
+            await update.message.reply_text("You are not authorized to use this bot.")
+            return
+        uid = update.effective_user.id
+        session_id = _session_id_for_user(uid)
+        connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
+        ok, err, data = await _put_chat_debug(connection, session_id, False)
+        if not ok:
+            await update.message.reply_text(_truncate_for_telegram(f"Failed to end debug log: {err}"))
+            return
+        path = (data or {}).get("trace_path") or ""
+        if path:
+            await update.message.reply_text(_truncate_for_telegram(f"Chat debug logging OFF. Last trace file:\n{path}"))
+        else:
+            await update.message.reply_text("Chat debug logging was not active for this session.")
 
     async def link_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _authorized(update.effective_user.id if update.effective_user else None):
@@ -576,6 +634,8 @@ def build_application():
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("clear", clear_cmd))
+    app.add_handler(CommandHandler("start_log", start_log_cmd))
+    app.add_handler(CommandHandler("end_log", end_log_cmd))
     app.add_handler(CommandHandler("model", model_cmd))
     app.add_handler(CommandHandler("system", system_cmd))
     app.add_handler(CommandHandler("link", link_cmd))

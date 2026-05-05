@@ -94,6 +94,13 @@ class ModelConfigUpdateRequest(BaseModel):
     deepseek_base_url: str | None = None
 
 
+class ChatDebugRequest(BaseModel):
+    """Enable or disable NDJSON chat tracing for a session (writes under ~/.mirai/debug/chat_trace/)."""
+
+    session_id: str = "default"
+    enabled: bool
+
+
 class SessionPromptRequest(BaseModel):
     system_prompt: str
 
