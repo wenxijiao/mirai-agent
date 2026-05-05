@@ -1,13 +1,12 @@
 """Mirai core HTTP API package.
 
 Heavy logic is split into sub-modules:
-- state   — shared mutable state & helpers
-- chat    — chat generation loop
-- edge    — edge connection lifecycle
-- timers  — timer scheduling
-- peers   — peer abstractions
-- schemas — request/response Pydantic models
-- routes  — FastAPI application and route definitions
+- runtime     — explicit mutable runtime state and registries
+- services    — application use-case boundaries
+- app_factory — FastAPI application assembly
+- routes      — compatibility alias for the app factory
+- state       — legacy facade over the default runtime
+- schemas     — request/response Pydantic models
 """
 
 from mirai.core.api.routes import app, create_app

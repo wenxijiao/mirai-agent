@@ -6,28 +6,18 @@ import time
 import uuid
 
 from json_repair import repair_json
-from mirai.core.api.chat_context import reset_chat_owner_user_id, set_chat_owner_user_id
 from mirai.core.api import chat_debug_trace
+from mirai.core.api.chat_context import reset_chat_owner_user_id, set_chat_owner_user_id
 from mirai.core.api.edge import _push_confirmation_policy_to_edge_peer, persist_local_tool_confirmation_to_config
 from mirai.core.api.state import (
-    ACTIVE_CONNECTIONS,
-    ALWAYS_ALLOWED_TOOLS,
-    CONFIRMATION_TOOLS,
-    DISABLED_TOOLS,
-    EDGE_TOOLS_REGISTRY,
     LOCAL_TOOL_TIMEOUT_DEFAULT,
     MAX_TOOL_CALL_FORMAT_RETRIES,
     MAX_TOOL_LOOPS,
-    PENDING_CONFIRMATIONS,
-    PENDING_TOOL_CALLS,
     SESSION_LOCKS,
+    TOOL_CALL_TIMEOUT_DEFAULT,
     edge_tool_key_prefix,
     edge_tool_register_prefix,
-    get_all_tool_schemas,
-    get_session_lock,
-    get_tool_timeout,
     parse_edge_connection_key,
-    prune_session_locks_if_needed,
     resolve_edge_for_prefixed_tool_name,
 )
 from mirai.core.plugins import (
@@ -123,6 +113,48 @@ def _persist_tool_ephemeral_tail(ephemeral_messages: list, session_id: str, bot)
 
 
 async def generate_chat_events(prompt: str, session_id: str, think: bool = False, *, timer_callback: bool = False):
+    from mirai.core.services.chat_turn import ChatTurnService
+
+    async for event in ChatTurnService().stream_chat_turn(
+        prompt,
+        session_id,
+        think=think,
+        timer_callback=timer_callback,
+    ):
+        yield event
+
+
+async def _generate_chat_events_impl(
+    prompt: str,
+    session_id: str,
+    think: bool = False,
+    *,
+    timer_callback: bool = False,
+    runtime=None,
+):
+    from mirai.core.api.state import get_runtime as get_legacy_runtime
+
+    active_runtime = runtime or get_legacy_runtime()
+    ACTIVE_CONNECTIONS = active_runtime.edge_registry.active_connections
+    ALWAYS_ALLOWED_TOOLS = active_runtime.tool_policy.always_allowed_tools
+    CONFIRMATION_TOOLS = active_runtime.tool_policy.confirmation_tools
+    DISABLED_TOOLS = active_runtime.tool_policy.disabled_tools
+    EDGE_TOOLS_REGISTRY = active_runtime.edge_registry.tools
+    PENDING_CONFIRMATIONS = active_runtime.tool_policy.pending_confirmations
+    PENDING_TOOL_CALLS = active_runtime.edge_registry.pending_tool_calls
+
+    def get_all_tool_schemas(identity=None):
+        return active_runtime.tool_catalog.all_tool_schemas(identity)
+
+    def get_session_lock(session_id: str):
+        return active_runtime.session_locks.get(session_id)
+
+    def get_tool_timeout(prefixed_name: str) -> int:
+        return active_runtime.tool_catalog.tool_timeout(prefixed_name, TOOL_CALL_TIMEOUT_DEFAULT)
+
+    def prune_session_locks_if_needed(max_entries: int = 5000) -> None:
+        active_runtime.session_locks.prune_if_needed(max_entries)
+
     owner_uid = get_session_scope().owner_user_from_session_id(session_id)
     owner_token = set_chat_owner_user_id(owner_uid)
     total_prompt_tokens = 0
