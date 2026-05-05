@@ -16,7 +16,17 @@ def get_api_credentials() -> dict[str, str | None]:
         "openai_base_url": os.getenv("OPENAI_BASE_URL") or config.openai_base_url,
         "gemini_api_key": os.getenv("GEMINI_API_KEY") or config.gemini_api_key,
         "claude_api_key": os.getenv("ANTHROPIC_API_KEY") or config.claude_api_key,
+        "deepseek_api_key": os.getenv("DEEPSEEK_API_KEY") or config.deepseek_api_key,
+        "deepseek_base_url": os.getenv("DEEPSEEK_BASE_URL") or config.deepseek_base_url,
     }
+
+
+def ensure_embedding_provider_not_deepseek(provider_name: str) -> None:
+    """DeepSeek public API is not compatible with our OpenAI-style embeddings path."""
+    if provider_name == "deepseek":
+        raise ValueError(
+            "embedding_provider cannot be 'deepseek'. Use ollama, openai, gemini, or claude for embeddings."
+        )
 
 
 def _get_provider(provider_name: str):
@@ -59,6 +69,13 @@ def ensure_provider_available(provider_name: str) -> None:
                 "MIRAI_MISSING_CLAUDE_KEY",
                 "Anthropic API key is required for the Claude provider.",
                 hint="Set ANTHROPIC_API_KEY or save claude_api_key in ~/.mirai/config.json or the web UI model settings.",
+            )
+    elif provider_name == "deepseek":
+        if not creds["deepseek_api_key"]:
+            raise ProviderNotReadyError(
+                "MIRAI_MISSING_DEEPSEEK_KEY",
+                "DeepSeek API key is required for the DeepSeek provider.",
+                hint="Set DEEPSEEK_API_KEY or save deepseek_api_key in ~/.mirai/config.json or the web UI model settings.",
             )
     else:
         from mirai.core.providers import SUPPORTED_PROVIDERS

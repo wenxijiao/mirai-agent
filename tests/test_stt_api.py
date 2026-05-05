@@ -67,6 +67,7 @@ def test_ensure_whisper_weights_cached_triggers_model_download(monkeypatch, tmp_
         def __init__(self, model_id: str, **kwargs: object) -> None:
             calls.append((model_id, kwargs))
 
+    monkeypatch.setattr("mirai.core.stt.whisper_provider._whisper_loads_from_disk", lambda **kwargs: False)
     monkeypatch.setattr("huggingface_hub.snapshot_download", _fake_snapshot_download)
     monkeypatch.setattr("faster_whisper.WhisperModel", _FakeWhisperModel)
     ensure_whisper_weights_cached(model=model, model_dir=str(tmp_path))
@@ -80,3 +81,25 @@ def test_ensure_whisper_weights_cached_triggers_model_download(monkeypatch, tmp_
     assert calls[0][1]["compute_type"] == "int8"
     assert str(tmp_path) in calls[0][1]["download_root"]
     assert calls[0][1]["local_files_only"] is True
+
+
+def test_ensure_whisper_weights_cached_skips_when_local(monkeypatch, tmp_path) -> None:
+    snapshot_calls: list[tuple] = []
+
+    def _fake_snapshot_download(*args, **kwargs):
+        snapshot_calls.append((args, kwargs))
+        return str(tmp_path / "hf-cache")
+
+    model_calls: list[tuple] = []
+
+    class _FakeWhisperModel:
+        def __init__(self, model_id: str, **kwargs: object) -> None:
+            model_calls.append((model_id, kwargs))
+
+    monkeypatch.setattr("huggingface_hub.snapshot_download", _fake_snapshot_download)
+    monkeypatch.setattr("faster_whisper.WhisperModel", _FakeWhisperModel)
+    monkeypatch.setattr("mirai.core.stt.whisper_provider._whisper_loads_from_disk", lambda **kwargs: True)
+
+    ensure_whisper_weights_cached(model="base", model_dir=str(tmp_path))
+    assert snapshot_calls == []
+    assert model_calls == []

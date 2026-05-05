@@ -41,12 +41,16 @@ def _choose_installed_model(models: list[str], label: str) -> str:
         print("That selection is out of range.")
 
 
-def _choose_provider(label: str) -> str:
+def _choose_provider(label: str, *, exclude: tuple[str, ...] = ()) -> str:
     from mirai.core.providers import SUPPORTED_PROVIDERS
+
+    choices = tuple(p for p in SUPPORTED_PROVIDERS if p not in exclude)
+    if not choices:
+        raise RuntimeError("No providers available for this step.")
 
     print()
     print(f"Choose a {label} provider:")
-    for i, name in enumerate(SUPPORTED_PROVIDERS, 1):
+    for i, name in enumerate(choices, 1):
         print(f"  {i}. {name}")
 
     while True:
@@ -56,12 +60,12 @@ def _choose_provider(label: str) -> str:
         except ValueError:
             print("Please enter a valid number.")
             continue
-        if 1 <= idx <= len(SUPPORTED_PROVIDERS):
-            return SUPPORTED_PROVIDERS[idx - 1]
+        if 1 <= idx <= len(choices):
+            return choices[idx - 1]
         print("That selection is out of range.")
 
 
-def _persist_cloud_api_key(provider_name: str, key: str) -> None:
+def _persist_cloud_api_key(provider_name: str, key: str, *, announce: bool = True) -> None:
     """Write a cloud API key to the process env and ~/.mirai/config.json."""
     if provider_name == "openai":
         env_var, field = "OPENAI_API_KEY", "openai_api_key"
@@ -69,16 +73,19 @@ def _persist_cloud_api_key(provider_name: str, key: str) -> None:
         env_var, field = "GEMINI_API_KEY", "gemini_api_key"
     elif provider_name == "claude":
         env_var, field = "ANTHROPIC_API_KEY", "claude_api_key"
+    elif provider_name == "deepseek":
+        env_var, field = "DEEPSEEK_API_KEY", "deepseek_api_key"
     else:
         return
     os.environ[env_var] = key
     config = load_saved_model_config()
     setattr(config, field, key)
     save_model_config(config)
-    print(f"  {env_var} saved to {CONFIG_PATH}.")
+    if announce:
+        print(f"  {env_var} saved to {CONFIG_PATH}.")
 
 
-def _prompt_api_key(provider_name: str) -> None:
+def _prompt_api_key(provider_name: str, *, announce_save: bool = True) -> None:
     """Prompt for API key and save to ~/.mirai/config.json."""
     creds = get_api_credentials()
 
@@ -91,22 +98,25 @@ def _prompt_api_key(provider_name: str) -> None:
     elif provider_name == "claude":
         env_var = "ANTHROPIC_API_KEY"
         existing = creds["claude_api_key"]
+    elif provider_name == "deepseek":
+        env_var = "DEEPSEEK_API_KEY"
+        existing = creds["deepseek_api_key"]
     else:
         return
 
     if existing:
         masked = existing[:4] + "..." + existing[-4:] if len(existing) > 8 else "***"
-        print(f"  {env_var} is already set ({masked}).")
+        print(f"  API key already configured ({masked}).")
         change = input("  Replace it? (y/N): ").strip().lower()
         if change != "y":
             os.environ[env_var] = existing
             return
 
-    key = input(f"  Enter your {env_var}: ").strip()
+    key = input("  API key: ").strip()
     if key:
-        _persist_cloud_api_key(provider_name, key)
+        _persist_cloud_api_key(provider_name, key, announce=announce_save)
     else:
-        print(f"  Warning: {env_var} is not set. The provider may fail.")
+        print(f"  Warning: no key set; set {env_var} later if this provider fails.")
 
 
 def _prompt_ollama_model(label: str) -> str:
@@ -169,7 +179,7 @@ def _prompt_model_name(provider_name: str, label: str) -> str:
         return _prompt_ollama_model(label)
 
     while True:
-        model = input(f"  Enter the {label} model name: ").strip()
+        model = input(f"  {label.capitalize()} model name: ").strip()
         if model:
             return model
         print("  Model name cannot be empty.")
@@ -237,18 +247,13 @@ def _prompt_stt_config(config: ModelConfig) -> None:
     config.stt_model = model
     config.stt_model_dir = model_dir or None
     config.stt_language = "auto"
-    print()
-    print("  Optional: put HF_TOKEN in ~/.mirai/.env for Hugging Face rate limits (see docs/CONFIGURATION.md).")
-    print("  Downloading Whisper weights (Hugging Face progress bar; first install can take several minutes)...")
     try:
         from mirai.core.stt.whisper_provider import ensure_whisper_weights_cached
 
         ensure_whisper_weights_cached(model=model, model_dir=config.stt_model_dir)
     except Exception as exc:
-        print(f"  Warning: could not pre-download Whisper weights: {exc}")
+        print(f"  Warning: could not prepare Whisper weights: {exc}")
         print("  Voice transcription will retry the download on first use.")
-    else:
-        print("  Whisper model files are ready.")
 
 
 def run_model_setup(force: bool = False) -> ModelConfig:
@@ -267,14 +272,14 @@ def run_model_setup(force: bool = False) -> ModelConfig:
 
     chat_provider = _choose_provider("chat")
     if chat_provider != "ollama":
-        _prompt_api_key(chat_provider)
+        _prompt_api_key(chat_provider, announce_save=False)
     else:
         ensure_provider_available("ollama")
     chat_model = _prompt_model_name(chat_provider, "chat")
 
-    embedding_provider = _choose_provider("embedding")
+    embedding_provider = _choose_provider("embedding", exclude=("deepseek",))
     if embedding_provider != "ollama" and embedding_provider != chat_provider:
-        _prompt_api_key(embedding_provider)
+        _prompt_api_key(embedding_provider, announce_save=False)
     if embedding_provider == "ollama":
         try:
             ensure_provider_available("ollama")

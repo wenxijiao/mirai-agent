@@ -16,6 +16,8 @@ class ModelConfig(BaseModel):
     openai_base_url: str | None = None
     gemini_api_key: str | None = None
     claude_api_key: str | None = None
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str | None = None
     connection_code: str | None = None
     session_prompts: dict[str, str] = {}
     ui_dark_mode: bool = True
@@ -172,3 +174,5 @@ class ModelConfig(BaseModel):
 RECOMMENDED_CHAT_MODEL = "qwen3.5:9b"
 RECOMMENDED_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
 RECOMMENDED_STT_MODEL = "base"
+
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"

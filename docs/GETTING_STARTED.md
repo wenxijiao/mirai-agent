@@ -70,9 +70,10 @@ mirai --setup
 | Provider | Chat | Embedding | Notes |
 |---|---|---|---|
 | `ollama` | Yes | Yes | Local models, no API key needed |
-| `openai` | Yes | Yes | Also works with OpenAI-compatible endpoints |
+| `openai` | Yes | Yes | Also works with OpenAI-compatible endpoints (including DeepSeek via `openai_base_url`) |
 | `gemini` | Yes | Yes | Google Gemini |
 | `claude` | Yes | No | Anthropic Claude (use another provider for embeddings) |
+| `deepseek` | Yes | No | DeepSeek chat API; use another provider for embeddings |
 
 You can mix providers — for example OpenAI for chat and Ollama for embeddings.
 

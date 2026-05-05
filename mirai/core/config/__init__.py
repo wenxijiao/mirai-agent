@@ -4,6 +4,7 @@ from mirai.core.config.connection import get_saved_connection_code, save_connect
 from mirai.core.config.credentials import (
     _get_provider,
     ensure_chat_model_configured,
+    ensure_embedding_provider_not_deepseek,
     ensure_model_ready,
     ensure_provider_available,
     get_api_credentials,
@@ -78,6 +79,7 @@ __all__ = [
     "delete_session_prompt",
     "ensure_chat_model_configured",
     "ensure_config_dir",
+    "ensure_embedding_provider_not_deepseek",
     "ensure_full_model_config_file",
     "ensure_memory_dir",
     "ensure_model_ready",

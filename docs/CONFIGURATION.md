@@ -16,12 +16,12 @@ Edit that JSON file for normal persistent configuration. Environment variables a
 
 Model and provider fields:
 
-- `chat_provider`: Chat model provider. Common values: `ollama`, `openai`, `gemini`, `claude`. Default: `ollama`.
+- `chat_provider`: Chat model provider. Common values: `ollama`, `openai`, `gemini`, `claude`, `deepseek`. Default: `ollama`.
 - `chat_model`: Chat model name. `null` means Mirai will use provider defaults/setup.
-- `embedding_provider`: Embedding provider. Default: `ollama`.
+- `embedding_provider`: Embedding provider. Default: `ollama`. **Do not use `deepseek` here** — the DeepSeek API is not used for Mirai’s embedding path; choose `ollama`, `openai`, `gemini`, or `claude` for cross-session memory vectors.
 - `embedding_model`: Embedding model name. `null` means provider default/setup.
 - `embedding_dim`: Optional embedding vector dimension override. Usually leave `null`.
-- `openai_api_key`, `openai_base_url`, `gemini_api_key`, `claude_api_key`: Saved provider credentials/base URL. Environment variables override these.
+- `openai_api_key`, `openai_base_url`, `gemini_api_key`, `claude_api_key`, `deepseek_api_key`, `deepseek_base_url`: Saved provider credentials/base URL. Environment variables override these.
 
 Prompt and session fields:
 
@@ -101,7 +101,7 @@ Speech-to-text fields:
 
 | Variable | Description |
 |---|---|
-| `MIRAI_CHAT_PROVIDER` | Override chat provider (`ollama`, `openai`, `gemini`, `claude`) |
+| `MIRAI_CHAT_PROVIDER` | Override chat provider (`ollama`, `openai`, `gemini`, `claude`, `deepseek`) |
 | `MIRAI_CHAT_MODEL` | Override chat model |
 | `MIRAI_EMBEDDING_PROVIDER` | Override embedding provider |
 | `MIRAI_EMBED_MODEL` | Override embedding model |
@@ -109,6 +109,8 @@ Speech-to-text fields:
 | `OPENAI_BASE_URL` | Custom OpenAI-compatible base URL |
 | `GEMINI_API_KEY` | Gemini API key |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key |
+| `DEEPSEEK_API_KEY` | DeepSeek API key (when `chat_provider` is `deepseek`) |
+| `DEEPSEEK_BASE_URL` | Optional DeepSeek API base URL (defaults to `https://api.deepseek.com`) |
 | `OLLAMA_HOST` | Ollama server URL (default `http://127.0.0.1:11434`; useful when Ollama runs on a different host or in Docker) |
 
 ### Server & Connection
@@ -268,7 +270,7 @@ When a timer fires for a Telegram session (`tg_<user_id>`), the **API process** 
 | `~/.mirai/profiles.json` | Saved remote profiles |
 | `~/.mirai/memory/` | Session history and embeddings |
 
-`config.json` can hold **multiple provider API keys at once** (`openai_api_key`, `gemini_api_key`, `claude_api_key`, and optional `openai_base_url`). Environment variables still win when set. `mirai --setup` only asks for what the chosen chat/embedding providers need; you can add other keys later via the web UI **Model Configuration** dialog or by editing `config.json`, so switching providers does not require re-entering keys once they are saved.
+`config.json` can hold **multiple provider API keys at once** (`openai_api_key`, `gemini_api_key`, `claude_api_key`, `deepseek_api_key`, and optional `openai_base_url`, `deepseek_base_url`). You can also use **`openai` + `openai_base_url`** pointed at DeepSeek’s OpenAI-compatible endpoint instead of `chat_provider: "deepseek"`. Environment variables still win when set. `mirai --setup` only asks for what the chosen chat/embedding providers need; you can add other keys later via the web UI **Model Configuration** dialog or by editing `config.json`, so switching providers does not require re-entering keys once they are saved.
 
 To clear only memory and embeddings (keeping config and profiles):
 

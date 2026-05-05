@@ -39,12 +39,38 @@ _WHISPER_HF_FILE_PATTERNS = [
 ]
 
 
+def _whisper_loads_from_disk(
+    *,
+    root: Path,
+    fw_id: str,
+    hf_token: str | None,
+) -> bool:
+    """True if faster-whisper can open this model from *root* without downloading."""
+    try:
+        from faster_whisper import WhisperModel
+
+        WhisperModel(
+            fw_id,
+            device="cpu",
+            compute_type="int8",
+            download_root=str(root),
+            local_files_only=True,
+            use_auth_token=hf_token,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def ensure_whisper_weights_cached(*, model: str, model_dir: str | None = None) -> None:
     """Download Whisper weight files to disk if missing (via faster-whisper).
 
     Uses :func:`huggingface_hub.snapshot_download` with a visible tqdm bar (faster-whisper's
     own ``download_model`` disables the bar). The same path applies to every built-in size,
     each mapped to a public Hugging Face CTranslate2 model.
+
+    If weights are already present under *model_dir* / default cache, skips download and
+    progress output (``mirai --setup`` stays quiet on repeat runs).
 
     Uses CPU + int8 for this pass to reduce peak RAM during setup; runtime inference
     may still use ``device=auto`` from :class:`WhisperSttProvider`.
@@ -67,6 +93,12 @@ def ensure_whisper_weights_cached(*, model: str, model_dir: str | None = None) -
             f"Internal error: no Hugging Face repo for Whisper model {model_name!r}. Update mirai for this STT size."
         )
     hf_token = get_token()
+    if _whisper_loads_from_disk(root=root, fw_id=fw_id, hf_token=hf_token):
+        return
+
+    print()
+    print("  Optional: put HF_TOKEN in ~/.mirai/.env for Hugging Face rate limits (see docs/CONFIGURATION.md).")
+    print("  Downloading Whisper weights (Hugging Face progress bar; first install can take several minutes)...")
     snapshot_download(
         repo_id,
         cache_dir=str(root),
@@ -82,6 +114,7 @@ def ensure_whisper_weights_cached(*, model: str, model_dir: str | None = None) -
         local_files_only=True,
         use_auth_token=hf_token,
     )
+    print("  Whisper model files are ready.")
 
 
 class WhisperSttProvider(SpeechToTextProvider):

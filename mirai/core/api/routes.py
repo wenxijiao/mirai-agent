@@ -73,6 +73,7 @@ from mirai.core.config import (
     delete_session_prompt,
     ensure_chat_model_configured,
     ensure_config_dir,
+    ensure_embedding_provider_not_deepseek,
     ensure_provider_available,
     get_api_credentials,
     get_session_prompt,
@@ -131,6 +132,12 @@ async def lifespan(app: FastAPI):
     apply_local_tool_confirmation_from_saved_config()
 
     config = ensure_chat_model_configured(interactive=False)
+    try:
+        ensure_embedding_provider_not_deepseek(config.embedding_provider)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{exc} Fix ~/.mirai/config.json (embedding_provider) or set MIRAI_EMBEDDING_PROVIDER."
+        ) from exc
 
     chat_provider = create_provider(config.chat_provider)
 
@@ -604,7 +611,10 @@ def _model_config_public_dict() -> dict:
         "openai_api_key_effective": bool(creds.get("openai_api_key")),
         "gemini_api_key_effective": bool(creds.get("gemini_api_key")),
         "claude_api_key_effective": bool(creds.get("claude_api_key")),
+        "deepseek_api_key_saved": bool(saved.deepseek_api_key and str(saved.deepseek_api_key).strip()),
+        "deepseek_api_key_effective": bool(creds.get("deepseek_api_key")),
         "openai_base_url": saved.openai_base_url or "",
+        "deepseek_base_url": saved.deepseek_base_url or "",
     }
 
 
@@ -631,6 +641,12 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
                 status_code=400,
                 detail=f"Unsupported Whisper model. Use one of: {', '.join(WHISPER_MULTILINGUAL_MODELS)}.",
             )
+
+    if request.embedding_provider == "deepseek":
+        raise HTTPException(
+            status_code=400,
+            detail="embedding_provider cannot be 'deepseek'. Use ollama, openai, gemini, or claude for embeddings.",
+        )
 
     backup_before = CONFIG_PATH.read_text(encoding="utf-8") if CONFIG_PATH.exists() else None
 
@@ -684,6 +700,18 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         v = request.openai_base_url.strip()
         config.openai_base_url = v if v else None
         keys_or_base_changed = True
+    if request.deepseek_api_key is not None and request.deepseek_api_key.strip():
+        config.deepseek_api_key = request.deepseek_api_key.strip()
+        keys_or_base_changed = True
+    if request.deepseek_base_url is not None:
+        v = request.deepseek_base_url.strip()
+        config.deepseek_base_url = v if v else None
+        keys_or_base_changed = True
+
+    try:
+        ensure_embedding_provider_not_deepseek(config.embedding_provider)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         save_model_config(config)
@@ -697,7 +725,7 @@ async def update_model_config_endpoint(request: ModelConfigUpdateRequest):
         _restore_config_file(backup_before)
         raise provider_not_ready_http(exc) from exc
 
-    need_reinit = provider_changed or (keys_or_base_changed and config.chat_provider in ("openai", "gemini", "claude"))
+    need_reinit = provider_changed or (keys_or_base_changed and config.chat_provider in ("openai", "gemini", "claude", "deepseek"))
 
     if _state.bot:
         try:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from mirai.core.providers.base import BaseLLMProvider
 
-SUPPORTED_PROVIDERS = ("ollama", "openai", "gemini", "claude")
+SUPPORTED_PROVIDERS = ("ollama", "openai", "gemini", "claude", "deepseek")
 
 
 def create_provider(
@@ -40,6 +40,13 @@ def create_provider(
         from mirai.core.providers.claude_provider import ClaudeProvider
 
         return ClaudeProvider(api_key=creds["claude_api_key"])
+
+    if provider_name == "deepseek":
+        from mirai.core.config.model import DEFAULT_DEEPSEEK_BASE_URL
+        from mirai.core.providers.openai_provider import OpenAIProvider
+
+        base = creds["deepseek_base_url"] or DEFAULT_DEEPSEEK_BASE_URL
+        return OpenAIProvider(api_key=creds["deepseek_api_key"], base_url=base)
 
     raise ValueError(f"Unknown provider: '{provider_name}'. Supported providers: {', '.join(SUPPORTED_PROVIDERS)}")
 

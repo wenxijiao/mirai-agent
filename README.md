@@ -42,7 +42,7 @@ pip install -e ".[dev]"
 mirai --server
 ```
 
-On first run, Mirai walks you through choosing a provider and model (Ollama for local, OpenAI, Gemini, or Claude for cloud).
+On first run, Mirai walks you through choosing a provider and model (Ollama for local, OpenAI, Gemini, Claude, or DeepSeek for cloud).
 
 ### 3. Try the demo
 
@@ -358,9 +358,10 @@ Sessions are keyed by `line_<user_id>`; `/clear`, `/model`, and `/system` work t
 | Provider | Chat | Embedding | Notes |
 |---|---|---|---|
 | Ollama | Yes | Yes | Local models, no API key needed |
-| OpenAI | Yes | Yes | Also works with OpenAI-compatible endpoints |
+| OpenAI | Yes | Yes | Also works with OpenAI-compatible endpoints (including pointing `openai_base_url` at DeepSeek) |
 | Gemini | Yes | Yes | Google Gemini |
 | Claude | Yes | No | Anthropic Claude (use another provider for embeddings) |
+| DeepSeek | Yes | No | OpenAI-compatible chat API; use Ollama, OpenAI, Gemini, or Claude for embeddings |
 
 You can mix providers — for example OpenAI for chat and Ollama for embeddings.
 

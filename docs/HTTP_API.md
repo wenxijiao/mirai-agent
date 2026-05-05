@@ -131,7 +131,7 @@ All paths are relative to the core base URL (e.g. `http://127.0.0.1:8000`).
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` / `PUT` / `DELETE` | `/config/system-prompt` | Global system prompt; `PUT` body `{"system_prompt":"..."}` |
-| `GET` / `PUT` | `/config/model` | Read/update model, memory, and Edge tool-routing settings; `PUT` may include `edge_tools_enable_dynamic_routing`, `edge_tools_retrieval_limit`, `openai_api_key`, `gemini_api_key`, `claude_api_key`, `openai_base_url` (non-empty key values are saved to `~/.mirai/config.json`; `GET` never returns raw keys, only `*_saved` / `*_effective` flags and `openai_base_url`) |
+| `GET` / `PUT` | `/config/model` | Read/update model, memory, and Edge tool-routing settings; `PUT` may include `edge_tools_enable_dynamic_routing`, `edge_tools_retrieval_limit`, `openai_api_key`, `gemini_api_key`, `claude_api_key`, `deepseek_api_key`, `openai_base_url`, `deepseek_base_url` (non-empty key values are saved to `~/.mirai/config.json`; `GET` never returns raw keys, only `*_saved` / `*_effective` flags and saved base URLs; **`embedding_provider` cannot be `deepseek`**) |
 | `GET` / `PUT` / `DELETE` | `/config/session-prompt/{session_id}` | Per-session system prompt override |
 | `GET` / `PUT` | `/config/ui` | UI preferences (e.g. dark mode) |
 | `GET` | `/tools` | List server and connected Edge tools |

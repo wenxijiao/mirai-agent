@@ -93,12 +93,57 @@ def test_model_config_public_dict_includes_key_flags(monkeypatch, tmp_path: Path
     assert d["openai_api_key_saved"] is True
     assert "openai_api_key_effective" in d
     assert "gemini_api_key_effective" in d
+    assert "deepseek_api_key_saved" in d
+    assert "deepseek_api_key_effective" in d
     assert "openai_base_url" in d
+    assert "deepseek_base_url" in d
     assert d["edge_tools_enable_dynamic_routing"] is True
     assert d["edge_tools_retrieval_limit"] == 20
     assert d["stt_provider"] == "disabled"
     assert d["stt_backend"] == "faster-whisper"
     assert d["stt_model"] == ""
+
+
+def test_create_provider_deepseek_wraps_openai_provider():
+    from mirai.core.providers import create_provider
+    from mirai.core.providers.openai_provider import OpenAIProvider
+
+    p = create_provider(
+        "deepseek",
+        credentials={
+            "openai_api_key": None,
+            "openai_base_url": None,
+            "gemini_api_key": None,
+            "claude_api_key": None,
+            "deepseek_api_key": "sk-test-deepseek",
+            "deepseek_base_url": None,
+        },
+    )
+    assert isinstance(p, OpenAIProvider)
+
+
+def test_put_config_model_rejects_deepseek_embedding_provider(monkeypatch, tmp_path: Path) -> None:
+    p = _patch_config_path(monkeypatch, tmp_path)
+    p.write_text(
+        json.dumps(
+            {
+                "chat_provider": "ollama",
+                "chat_model": "m",
+                "embedding_provider": "ollama",
+                "embedding_model": "m",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def _run():
+        with pytest.raises(HTTPException) as ei:
+            await update_model_config_endpoint(ModelConfigUpdateRequest(embedding_provider="deepseek"))
+        return ei.value
+
+    exc = asyncio.run(_run())
+    assert exc.status_code == 400
+    assert "deepseek" in str(exc.detail).lower()
 
 
 def test_put_config_model_updates_edge_tool_routing_settings(monkeypatch, tmp_path: Path) -> None:
