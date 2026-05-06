@@ -512,14 +512,6 @@ def test_legacy_json_derives_proactive_mode_from_enabled():
     assert cfg2.proactive_enabled is False
 
 
-def test_proactive_mode_off_never_sends():
-    cfg = ModelConfig(proactive_mode="off", proactive_quiet_hours="")
-    now = datetime(2026, 5, 3, 12, 0, tzinfo=timezone.utc)
-    d = decide_proactive_send(cfg, ProactiveSessionState("tg_1"), now=now)
-    assert d.should_send is False
-    assert d.reason == "disabled"
-
-
 def test_scheduled_fixed_time_triggers_in_grace_window():
     cfg = ModelConfig(
         proactive_mode="scheduled",

@@ -49,7 +49,8 @@ class OpenAIProvider(BaseLLMProvider):
             from openai import AsyncOpenAI, OpenAI
         except ImportError as exc:
             raise ImportError(
-                "The 'openai' package is required for the OpenAI provider. Install it with: pip install openai"
+                "The 'openai' package is required for the OpenAI / DeepSeek provider. "
+                "Install it with: pip install 'mirai-agent[openai]'"
             ) from exc
 
         resolved_key = api_key or os.getenv("OPENAI_API_KEY") or ""

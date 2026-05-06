@@ -305,7 +305,7 @@ class GeminiProvider(BaseLLMProvider):
         except ImportError as exc:
             raise ImportError(
                 "The 'google-genai' package is required for the Gemini provider. "
-                "Install it with: pip install google-genai"
+                "Install it with: pip install 'mirai-agent[gemini]'"
             ) from exc
 
         resolved_key = api_key or os.getenv("GEMINI_API_KEY") or ""

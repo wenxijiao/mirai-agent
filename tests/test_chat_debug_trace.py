@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from mirai.core.api.chat_debug_trace import (
     append_stream_event,
     append_turn_begin,

@@ -13,6 +13,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from mirai.core.api.events import ErrorEvent, TextEvent, ToolConfirmationEvent, parse_chat_event
+from mirai.core.api.stream_consumer import BaseChannelHandler, consume_chat_stream
 from mirai.core.api.uploads import MAX_UPLOAD_BYTES, save_uploaded_file
 from mirai.core.config import get_telegram_allowed_user_ids, get_telegram_bot_token
 from mirai.core.connection import DEFAULT_LOCAL_SERVER_URL, ConnectionConfig
@@ -74,6 +76,34 @@ async def _send_long_text(send: Callable[[str], Awaitable[Any]], text: str) -> N
         await send(chunk)
 
 
+async def _iter_chat_events_from_http_stream(response: httpx.Response):
+    """Parse one HTTP NDJSON ``response`` body into typed :class:`ChatEvent` objects.
+
+    Mirrors the legacy hand-rolled byte loop: decode chunks as UTF-8, split on
+    ``\\n``, drop blank lines, validate each via :func:`parse_chat_event`.
+    Validation errors are silently skipped so a malformed line never wedges
+    the consumer (matches legacy ``json.JSONDecodeError`` behaviour).
+    """
+    from pydantic import ValidationError
+
+    buffer = ""
+    async for chunk in response.aiter_bytes():
+        if not chunk:
+            continue
+        buffer += chunk.decode("utf-8", errors="replace")
+        while "\n" in buffer:
+            line, buffer = buffer.split("\n", 1)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield parse_chat_event(line)
+            except ValidationError:
+                continue
+            except json.JSONDecodeError:
+                continue
+
+
 async def _post_tool_confirm(connection: ConnectionConfig, call_id: str, decision: str) -> tuple[bool, str]:
     url = _api_url(connection, "/tools/confirm")
     headers = connection.auth_headers()
@@ -84,6 +114,74 @@ async def _post_tool_confirm(connection: ConnectionConfig, call_id: str, decisio
         if r.status_code >= 400:
             return False, r.text[:500]
         return True, ""
+
+
+class _TelegramChatHandler(BaseChannelHandler):
+    """Telegram-flavoured rendering for one ``/chat`` turn.
+
+    * ``text`` chunks accumulate into ``self.text_parts`` and are sent in one
+      ``send_long_text`` call after the stream ends.
+    * ``tool_confirmation`` posts a Telegram inline-keyboard prompt and waits
+      for the user's tap (resolved via :data:`_PENDING_TOOL_CONFIRM`).
+    * ``error`` sends a single message containing the error content.
+    * ``thought`` / ``tool_status`` are dropped — Telegram has no good UI for them.
+    """
+
+    CONFIRMATION_TIMEOUT_SECONDS = 600.0
+    _DECISION_MAP = {"deny": "deny", "allow": "allow", "always": "always_allow"}
+
+    def __init__(self, *, context, chat_id: int, connection: ConnectionConfig) -> None:
+        self.context = context
+        self.chat_id = chat_id
+        self.connection = connection
+        self.text_parts: list[str] = []
+
+    async def on_text(self, event: TextEvent) -> None:
+        self.text_parts.append(event.content)
+
+    async def on_tool_confirmation(self, event: ToolConfirmationEvent) -> None:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        short_id = uuid.uuid4().hex
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        _PENDING_TOOL_CONFIRM[short_id] = future
+        args_preview = json.dumps(event.arguments, ensure_ascii=False)[:800]
+        text = _truncate_for_telegram(
+            f"Tool confirmation required\n\nTool: {event.tool_name}\nArguments: {args_preview}"
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Deny", callback_data=f"tc|{short_id}|deny"),
+                    InlineKeyboardButton("Allow", callback_data=f"tc|{short_id}|allow"),
+                ],
+                [InlineKeyboardButton("Always allow", callback_data=f"tc|{short_id}|always")],
+            ]
+        )
+        await self.context.bot.send_message(chat_id=self.chat_id, text=text, reply_markup=keyboard)
+        try:
+            action = await asyncio.wait_for(future, timeout=self.CONFIRMATION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            await self.context.bot.send_message(chat_id=self.chat_id, text="Confirmation timed out.")
+            action = "deny"
+        finally:
+            _PENDING_TOOL_CONFIRM.pop(short_id, None)
+        decision = self._DECISION_MAP.get(action, "deny")
+        ok, err = await _post_tool_confirm(self.connection, event.call_id, decision)
+        if not ok:
+            await self.context.bot.send_message(
+                chat_id=self.chat_id,
+                text=_truncate_for_telegram(f"Confirm failed: {err}"),
+            )
+
+    async def on_error(self, event: ErrorEvent) -> None:
+        await self.context.bot.send_message(
+            chat_id=self.chat_id,
+            text=_truncate_for_telegram(f"Error: {event.content}"),
+        )
+
+    def final_text(self) -> str:
+        return "".join(self.text_parts)
 
 
 async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> tuple[bool, str]:
@@ -171,10 +269,14 @@ def build_application():
             filters,
         )
 
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+        from telegram import (  # noqa: F401 — Inline* imports verify SDK availability
+            InlineKeyboardButton,
+            InlineKeyboardMarkup,
+            Update,
+        )
     except ImportError as exc:
         raise RuntimeError(
-            "Failed to import python-telegram-bot. Reinstall mirai-agent or run: pip install python-telegram-bot"
+            "Failed to import python-telegram-bot. Install the Telegram extra: pip install 'mirai-agent[telegram]'"
         ) from exc
 
     token = get_telegram_bot_token()
@@ -542,8 +644,7 @@ def build_application():
         payload = {"prompt": prompt, "session_id": session_id}
         timeout = httpx.Timeout(10.0, read=600.0)
 
-        accumulated: list[str] = []
-
+        handler = _TelegramChatHandler(context=context, chat_id=chat_id, connection=connection)
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream("POST", url, json=payload, headers=headers) as response:
                 if response.status_code >= 400:
@@ -552,72 +653,10 @@ def build_application():
                         _truncate_for_telegram(f"HTTP {response.status_code}: {body[:500]}")
                     )
                     return
+                await consume_chat_stream(_iter_chat_events_from_http_stream(response), handler)
 
-                buffer = ""
-                async for chunk in response.aiter_bytes():
-                    if not chunk:
-                        continue
-                    buffer += chunk.decode("utf-8", errors="replace")
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            event = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        et = event.get("type")
-                        if et == "text":
-                            accumulated.append(str(event.get("content", "")))
-                        elif et == "tool_confirmation":
-                            call_id = str(event.get("call_id", ""))
-                            tool_name = str(event.get("tool_name", ""))
-                            args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
-                            short_id = uuid.uuid4().hex
-                            fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-                            _PENDING_TOOL_CONFIRM[short_id] = fut
-                            args_preview = json.dumps(args, ensure_ascii=False)[:800]
-                            text = _truncate_for_telegram(
-                                f"Tool confirmation required\n\nTool: {tool_name}\nArguments: {args_preview}"
-                            )
-                            keyboard = InlineKeyboardMarkup(
-                                [
-                                    [
-                                        InlineKeyboardButton("Deny", callback_data=f"tc|{short_id}|deny"),
-                                        InlineKeyboardButton("Allow", callback_data=f"tc|{short_id}|allow"),
-                                    ],
-                                    [
-                                        InlineKeyboardButton("Always allow", callback_data=f"tc|{short_id}|always"),
-                                    ],
-                                ]
-                            )
-                            await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=keyboard)
-
-                            try:
-                                action = await asyncio.wait_for(fut, timeout=600.0)
-                            except asyncio.TimeoutError:
-                                await context.bot.send_message(chat_id=chat_id, text="Confirmation timed out.")
-                                action = "deny"
-                            finally:
-                                _PENDING_TOOL_CONFIRM.pop(short_id, None)
-
-                            decision_map = {"deny": "deny", "allow": "allow", "always": "always_allow"}
-                            dkey = decision_map.get(action, "deny")
-                            ok, err = await _post_tool_confirm(connection, call_id, dkey)
-                            if not ok:
-                                await context.bot.send_message(
-                                    chat_id=chat_id,
-                                    text=_truncate_for_telegram(f"Confirm failed: {err}"),
-                                )
-                        elif et == "error":
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text=_truncate_for_telegram(f"Error: {event.get('content', 'Unknown')}"),
-                            )
-
-        if accumulated:
-            await _send_long_text(lambda t: update.message.reply_text(t), "".join(accumulated))
+        if handler.final_text():
+            await _send_long_text(lambda t: update.message.reply_text(t), handler.final_text())
 
     async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         _LOG.exception("Telegram handler error", exc_info=context.error)

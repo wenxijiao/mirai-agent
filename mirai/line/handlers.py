@@ -18,6 +18,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
+from mirai.core.api.events import ErrorEvent, TextEvent, ToolConfirmationEvent
+from mirai.core.api.stream_consumer import BaseChannelHandler, consume_chat_stream
 from mirai.core.api.uploads import MAX_UPLOAD_BYTES, save_uploaded_file
 from mirai.core.audit import audit_event
 from mirai.core.config import load_saved_model_config
@@ -341,6 +343,124 @@ async def _send_messages(
         await line_client.push_message(user_id, messages)
 
 
+class _LineChatHandler(BaseChannelHandler):
+    """LINE-flavoured rendering for one ``/chat`` turn.
+
+    Behaviour matches the four hand-rolled message-loop blocks that previously
+    lived inline in ``handle_line_message_event``:
+
+    * ``text`` chunks accumulate into ``self.text_parts`` (final reply built once
+      the stream ends).
+    * ``tool_confirmation`` pushes a Flex confirmation card, awaits the user's
+      Flex-postback decision via :data:`PENDING_TOOL_CONFIRM`, then forwards the
+      decision to the OSS ``/tools/confirm`` endpoint.
+    * ``error`` pushes a plain-text "Error: ..." reply.
+    * ``thought`` / ``tool_status`` are dropped — LINE has no good UI for them.
+    """
+
+    CONFIRMATION_TIMEOUT_SECONDS = 600.0
+    _DECISION_MAP = {"deny": "deny", "allow": "allow", "always": "always_allow"}
+
+    def __init__(
+        self,
+        *,
+        line_client: LineMessagingClient,
+        line_user_id: str,
+        reply_token: str | None,
+        connection: ConnectionConfig,
+        started_monotonic: float,
+    ) -> None:
+        self.line_client = line_client
+        self.line_user_id = line_user_id
+        self.reply_token = reply_token
+        self.connection = connection
+        self.started_monotonic = started_monotonic
+        self.text_parts: list[str] = []
+
+    async def on_text(self, event: TextEvent) -> None:
+        self.text_parts.append(event.content)
+
+    async def on_tool_confirmation(self, event: ToolConfirmationEvent) -> None:
+        short_id = uuid.uuid4().hex[:8]
+        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        PENDING_TOOL_CONFIRM[short_id] = future
+        args_preview = json.dumps(event.arguments, ensure_ascii=False)[:800]
+        bubble = tool_confirm_card(event.tool_name, args_preview, short_id)
+        try:
+            await self.line_client.push_message(self.line_user_id, [flex_message("Confirm", bubble)])
+        except Exception:
+            pass
+        try:
+            action = await asyncio.wait_for(future, timeout=self.CONFIRMATION_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            action = "deny"
+        finally:
+            PENDING_TOOL_CONFIRM.pop(short_id, None)
+        decision = self._DECISION_MAP.get(action, "deny")
+        ok, err = await _post_tool_confirm(self.connection, event.call_id, decision)
+        if not ok:
+            await self._reply_text(f"Confirmation failed: {err}", push=True)
+
+    async def on_error(self, event: ErrorEvent) -> None:
+        await self._reply_text(f"Error: {event.content}", push=True)
+
+    def final_text(self) -> str:
+        return "".join(self.text_parts)
+
+    async def _reply_text(self, text: str, *, push: bool = False) -> None:
+        msgs = [text_message(p) for p in _split_line_text(text)]
+        await _send_messages(
+            self.line_client,
+            self.reply_token,
+            self.line_user_id,
+            msgs,
+            started_monotonic=self.started_monotonic,
+            prefer_push=push,
+        )
+
+
+async def _run_line_chat_turn(
+    *,
+    line_client: LineMessagingClient,
+    line_user_id: str,
+    prompt: str,
+    session_id: str,
+    reply_token: str | None,
+    connection: ConnectionConfig,
+    started_monotonic: float,
+    use_http: bool,
+    prefix_messages: list[dict[str, Any]] | None = None,
+) -> None:
+    """Drive one chat turn through ``stream_line_chat`` + send the final reply.
+
+    ``prefix_messages`` is for media-receipt bubbles that should be prepended
+    to the assistant's text reply (image/file path).
+    """
+    handler = _LineChatHandler(
+        line_client=line_client,
+        line_user_id=line_user_id,
+        reply_token=reply_token,
+        connection=connection,
+        started_monotonic=started_monotonic,
+    )
+    await consume_chat_stream(
+        stream_line_chat(line_user_id, prompt, session_id, use_http=use_http),
+        handler,
+    )
+    final_text = handler.final_text()
+    msgs: list[dict[str, Any]] = list(prefix_messages or [])
+    if final_text:
+        msgs.extend(text_message(chunk) for chunk in _split_line_text(final_text))
+    if msgs:
+        await _send_messages(
+            line_client,
+            reply_token,
+            line_user_id,
+            msgs,
+            started_monotonic=started_monotonic,
+        )
+
+
 async def _get_model_dict(line_user_id: str, *, use_http: bool) -> dict[str, Any] | None:
     if use_http:
         connection = chat_connection_config(line_user_id)
@@ -505,45 +625,16 @@ async def handle_line_message_event(
         if not prompt:
             return
         record_user_message(session_id)
-
-        accumulated: list[str] = []
-        async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
-            et = ev.get("type")
-            if et == "text":
-                accumulated.append(str(ev.get("content", "")))
-            elif et == "tool_confirmation":
-                call_id = str(ev.get("call_id", ""))
-                tool_name = str(ev.get("tool_name", ""))
-                args = ev.get("arguments") if isinstance(ev.get("arguments"), dict) else {}
-                short_id = uuid.uuid4().hex[:8]
-                fut: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-                PENDING_TOOL_CONFIRM[short_id] = fut
-                args_preview = json.dumps(args, ensure_ascii=False)[:800]
-                bubble = tool_confirm_card(tool_name, args_preview, short_id)
-                try:
-                    await line_client.push_message(user_id, [flex_message("Confirm", bubble)])
-                except Exception:
-                    pass
-                try:
-                    action = await asyncio.wait_for(fut, timeout=600.0)
-                except asyncio.TimeoutError:
-                    action = "deny"
-                finally:
-                    PENDING_TOOL_CONFIRM.pop(short_id, None)
-                decision_map = {"deny": "deny", "allow": "allow", "always": "always_allow"}
-                dkey = decision_map.get(action, "deny")
-                ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
-                if not ok_c:
-                    await reply_text(f"Confirmation failed: {err_c}", push=True)
-            elif et == "error":
-                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
-
-        final_text = "".join(accumulated)
-        msgs: list[dict[str, Any]] = []
-        for chunk in _split_line_text(final_text) if final_text else []:
-            msgs.append(text_message(chunk))
-        if msgs:
-            await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
+        await _run_line_chat_turn(
+            line_client=line_client,
+            line_user_id=user_id,
+            prompt=prompt,
+            session_id=session_id,
+            reply_token=reply_tok,
+            connection=connection,
+            started_monotonic=started,
+            use_http=use_http,
+        )
         return
 
     if mtype == "audio":
@@ -574,42 +665,16 @@ async def handle_line_message_event(
             await reply_text("Transcription produced no text.")
             return
         record_user_message(session_id)
-
-        accumulated: list[str] = []
-        async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
-            et = ev.get("type")
-            if et == "text":
-                accumulated.append(str(ev.get("content", "")))
-            elif et == "tool_confirmation":
-                call_id = str(ev.get("call_id", ""))
-                tool_name = str(ev.get("tool_name", ""))
-                args = ev.get("arguments") if isinstance(ev.get("arguments"), dict) else {}
-                short_id = uuid.uuid4().hex[:8]
-                fut = asyncio.get_running_loop().create_future()
-                PENDING_TOOL_CONFIRM[short_id] = fut
-                args_preview = json.dumps(args, ensure_ascii=False)[:800]
-                bubble = tool_confirm_card(tool_name, args_preview, short_id)
-                try:
-                    await line_client.push_message(user_id, [flex_message("Confirm", bubble)])
-                except Exception:
-                    pass
-                try:
-                    action = await asyncio.wait_for(fut, timeout=600.0)
-                except asyncio.TimeoutError:
-                    action = "deny"
-                finally:
-                    PENDING_TOOL_CONFIRM.pop(short_id, None)
-                decision_map = {"deny": "deny", "allow": "allow", "always": "always_allow"}
-                dkey = decision_map.get(action, "deny")
-                ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
-                if not ok_c:
-                    await reply_text(f"Confirmation failed: {err_c}", push=True)
-            elif et == "error":
-                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
-        final_text = "".join(accumulated)
-        if final_text:
-            msgs = [text_message(chunk) for chunk in _split_line_text(final_text)]
-            await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
+        await _run_line_chat_turn(
+            line_client=line_client,
+            line_user_id=user_id,
+            prompt=prompt,
+            session_id=session_id,
+            reply_token=reply_tok,
+            connection=connection,
+            started_monotonic=started,
+            use_http=use_http,
+        )
         return
 
     # Non-text: image / file
@@ -630,43 +695,17 @@ async def handle_line_message_event(
                 media_receipts.append(flex_message("File", file_upload_receipt(name, sz, None)))
             except OSError:
                 pass
-        accumulated: list[str] = []
-        async for ev in stream_line_chat(user_id, prompt, session_id, use_http=use_http):
-            et = ev.get("type")
-            if et == "text":
-                accumulated.append(str(ev.get("content", "")))
-            elif et == "tool_confirmation":
-                call_id = str(ev.get("call_id", ""))
-                tool_name = str(ev.get("tool_name", ""))
-                args = ev.get("arguments") if isinstance(ev.get("arguments"), dict) else {}
-                short_id = uuid.uuid4().hex[:8]
-                fut = asyncio.get_running_loop().create_future()
-                PENDING_TOOL_CONFIRM[short_id] = fut
-                args_preview = json.dumps(args, ensure_ascii=False)[:800]
-                bubble = tool_confirm_card(tool_name, args_preview, short_id)
-                try:
-                    await line_client.push_message(user_id, [flex_message("Confirm", bubble)])
-                except Exception:
-                    pass
-                try:
-                    action = await asyncio.wait_for(fut, timeout=600.0)
-                except asyncio.TimeoutError:
-                    action = "deny"
-                finally:
-                    PENDING_TOOL_CONFIRM.pop(short_id, None)
-                decision_map = {"deny": "deny", "allow": "allow", "always": "always_allow"}
-                dkey = decision_map.get(action, "deny")
-                ok_c, err_c = await _post_tool_confirm(connection, call_id, dkey)
-                if not ok_c:
-                    await reply_text(f"Confirmation failed: {err_c}", push=True)
-            elif et == "error":
-                await reply_text(f"Error: {ev.get('content', 'Unknown')}", push=True)
-        final_text = "".join(accumulated)
-        msgs: list[dict[str, Any]] = list(media_receipts)
-        for chunk in _split_line_text(final_text) if final_text else []:
-            msgs.append(text_message(chunk))
-        if msgs:
-            await _send_messages(line_client, reply_tok, user_id, msgs, started_monotonic=started)
+        await _run_line_chat_turn(
+            line_client=line_client,
+            line_user_id=user_id,
+            prompt=prompt,
+            session_id=session_id,
+            reply_token=reply_tok,
+            connection=connection,
+            started_monotonic=started,
+            use_http=use_http,
+            prefix_messages=media_receipts,
+        )
         return
 
     await reply_text("Unsupported message type (send text, image, file, or voice).")
@@ -805,17 +844,19 @@ async def handle_line_postback_event(
             f"Planned task: {description}\n"
             f"Now execute it: use currently available tools only when needed, then answer the user in the same language."
         )
-        line_uid = user_id
-        accumulated: list[str] = []
-        async for ev in stream_line_chat(line_uid, prompt, client_sid, use_http=use_http):
-            if ev.get("type") == "text":
-                accumulated.append(str(ev.get("content", "")))
-            elif ev.get("type") == "error":
-                await reply_text(str(ev.get("content", "error")), push=True)
-        final = "".join(accumulated)
-        if final:
-            msgs = [text_message(t) for t in _split_line_text(final)]
-            await _send_messages(line_client, None, user_id, msgs, started_monotonic=started, prefer_push=True)
+        # Timer-rerun postbacks always push (no reply token left); confirmations
+        # in this path are unusual but we still go through the standard handler
+        # so any tool that asks for approval is offered the same Flex card.
+        await _run_line_chat_turn(
+            line_client=line_client,
+            line_user_id=user_id,
+            prompt=prompt,
+            session_id=client_sid,
+            reply_token=None,
+            connection=chat_connection_config(user_id),
+            started_monotonic=started,
+            use_http=use_http,
+        )
         return
 
 

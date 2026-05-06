@@ -1,4 +1,12 @@
-"""Timer scheduling helpers extracted from api.py."""
+"""Timer scheduling helpers.
+
+A scheduled timer is just an ``asyncio.Task`` that sleeps for ``delay``
+seconds, then drives a follow-up chat turn through ``generate_chat_events``
+and fans the resulting events out to LINE/Telegram and any subscribers
+listening on ``/timer-events``. Recurring timers reschedule themselves.
+"""
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -82,13 +90,7 @@ async def _timer_fire(timer_id: str, delay: int, description: str, session_id: s
         schedule_timer(timer_id, next_delay, description, session_id)
 
 
-def schedule_timer(timer_id: str, delay: int, description: str, session_id: str):
-    from mirai.core.services.timer_service import TimerService
-
-    TimerService().schedule_timer(timer_id, delay, description, session_id)
-
-
-def _schedule_timer_impl(timer_id: str, delay: int, description: str, session_id: str, *, runtime=None):
+def schedule_timer(timer_id: str, delay: int, description: str, session_id: str) -> None:
     logger.info(
         "Timer scheduled: timer_id=%s delay=%ss session_id=%s",
         timer_id,
@@ -98,18 +100,10 @@ def _schedule_timer_impl(timer_id: str, delay: int, description: str, session_id
     loop = asyncio.get_running_loop()
     task = loop.create_task(_timer_fire(timer_id, delay, description, session_id))
     log_task_exc_on_done(task, f"timer_fire timer_id={timer_id!r}")
-    tasks = runtime.timer_registry.tasks if runtime is not None else TIMER_TASKS
-    tasks[timer_id] = task
+    TIMER_TASKS[timer_id] = task
 
 
-def cancel_timer(timer_id: str):
-    from mirai.core.services.timer_service import TimerService
-
-    TimerService().cancel_timer(timer_id)
-
-
-def _cancel_timer_impl(timer_id: str, *, runtime=None):
-    tasks = runtime.timer_registry.tasks if runtime is not None else TIMER_TASKS
-    task = tasks.pop(timer_id, None)
+def cancel_timer(timer_id: str) -> None:
+    task = TIMER_TASKS.pop(timer_id, None)
     if task and not task.done():
         task.cancel()

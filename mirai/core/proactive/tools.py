@@ -10,13 +10,13 @@ from mirai.core.api.state import (
     CONFIRMATION_TOOLS,
     DISABLED_TOOLS,
     EDGE_TOOLS_REGISTRY,
-    LOCAL_TOOL_TIMEOUT_DEFAULT,
     PENDING_TOOL_CALLS,
     edge_tool_key_prefix,
     edge_tool_register_prefix,
     get_tool_timeout,
     parse_edge_connection_key,
 )
+from mirai.core.dispatch.limits import LOCAL_TOOL_TIMEOUT_DEFAULT
 from mirai.core.tool import TOOL_REGISTRY, execute_registered_tool
 from mirai.logging_config import get_logger
 

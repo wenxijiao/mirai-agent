@@ -2,6 +2,25 @@
 
 This document describes what Mirai persists and how it reaches the model.
 
+## Internal layout
+
+The OSS implementation is split into a façade plus per-aggregate repositories so backends (LanceDB today, PostgreSQL in enterprise) can be swapped without rewriting the public surface:
+
+```
+mirai/core/memories/
+├── memory.py              # Memory façade (public class)
+├── backend.py             # LanceDBBackend: connection, table helpers, time/SQL primitives
+├── embedding_runner.py    # EmbeddingProcessor: dim migration + background re-embed
+└── repos/
+    ├── messages.py        # MessageRepository       — chat_history
+    ├── sessions.py        # SessionRepository       — chat_sessions
+    ├── long_term.py       # LongTermMemoryRepository — long_term_memories
+    ├── observations.py    # ToolObservationRepository — tool_observations
+    └── summaries.py       # SessionSummaryRepository — session_summaries
+```
+
+Every public method on `Memory` (e.g. `add_message`, `create_session`, `list_long_term_memories`) is a one-line delegate to the appropriate repository. The `Memory` constructor signature has not changed; existing call sites (`MiraiBot.session_memory(...)`, enterprise per-user memory factory, tests that pass `storage_dir=tmpdir`) keep working unchanged.
+
 ## Storage
 
 - Chat messages (per `session_id`) are stored under the user memory directory (see `migrate_legacy_memory_dir()`), in **LanceDB** tables: `chat_history` and `chat_sessions`.

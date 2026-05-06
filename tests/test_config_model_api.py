@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
-from mirai.core.api.routes import _model_config_public_dict, update_model_config_endpoint
+from mirai.core.api.routers.config import _model_config_public_dict, update_model_config_endpoint
 from mirai.core.api.schemas import ModelConfigUpdateRequest
 
 
@@ -16,7 +16,7 @@ def _patch_config_path(monkeypatch, tmp_path: Path, name: str = "c.json") -> Pat
     p = tmp_path / name
     monkeypatch.setattr("mirai.core.config.paths.CONFIG_PATH", p)
     monkeypatch.setattr("mirai.core.config.store.CONFIG_PATH", p)
-    monkeypatch.setattr("mirai.core.api.routes.CONFIG_PATH", p)
+    monkeypatch.setattr("mirai.core.api.routers.config.CONFIG_PATH", p)
     return p
 
 
@@ -163,7 +163,7 @@ def test_put_config_model_updates_edge_tool_routing_settings(monkeypatch, tmp_pa
     import mirai.core.api.state as api_state
 
     monkeypatch.setattr(api_state, "bot", None)
-    monkeypatch.setattr("mirai.core.api.routes.ensure_provider_available", lambda provider: None)
+    monkeypatch.setattr("mirai.core.api.routers.config.ensure_provider_available", lambda provider: None)
 
     async def _run():
         return await update_model_config_endpoint(

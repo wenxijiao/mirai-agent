@@ -166,7 +166,6 @@ class ProactiveMessageService:
             CONFIRMATION_TOOLS,
             DISABLED_TOOLS,
             EDGE_TOOLS_REGISTRY,
-            LOCAL_TOOL_TIMEOUT_DEFAULT,
             PENDING_TOOL_CALLS,
             edge_tool_key_prefix,
             edge_tool_register_prefix,
@@ -174,6 +173,7 @@ class ProactiveMessageService:
             parse_edge_connection_key,
             resolve_edge_for_prefixed_tool_name,
         )
+        from mirai.core.dispatch.limits import LOCAL_TOOL_TIMEOUT_DEFAULT
         from mirai.core.tool import TOOL_REGISTRY, execute_registered_tool
 
         if name in TOOL_REGISTRY:

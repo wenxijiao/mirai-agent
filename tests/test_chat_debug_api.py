@@ -6,8 +6,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
-
-from mirai.core.api.routes import get_chat_debug_endpoint, put_chat_debug_endpoint
+from mirai.core.api.routers.chat import get_chat_debug_endpoint, put_chat_debug_endpoint
 from mirai.core.api.schemas import ChatDebugRequest
 
 
