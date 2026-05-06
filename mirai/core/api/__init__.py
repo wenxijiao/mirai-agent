@@ -16,12 +16,22 @@ without spinning up the full FastAPI app — important for breaking the
 before any HTTP-facing module.
 """
 
+from typing import TYPE_CHECKING, Any
+
 from mirai.core.api.state import stream_event
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    app: "FastAPI"
+
+    def create_app() -> "FastAPI": ...
+
 
 __all__ = ["app", "create_app", "stream_event"]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name in ("app", "create_app"):
         from mirai.core.api.app_factory import app, create_app
 

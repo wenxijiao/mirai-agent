@@ -9,11 +9,34 @@ in enterprise tests) is one assignment and every reader sees it immediately.
 """
 
 import asyncio
+from typing import TYPE_CHECKING, Any
 
 from mirai.core.memories.memory import Memory
 from mirai.core.runtime import RuntimeState, get_default_runtime
 from mirai.core.runtime.tool_catalog import model_visible_tool_schema as _model_visible_tool_schema
 from mirai.logging_config import get_logger
+
+if TYPE_CHECKING:
+    # Static type stubs for the names resolved through ``__getattr__``. These
+    # are never evaluated at runtime; PEP 562 ``__getattr__`` below is what
+    # actually returns the live values from the active ``_runtime``.
+    ACTIVE_CONNECTIONS: dict
+    EDGE_TOOLS_REGISTRY: dict
+    PENDING_TOOL_CALLS: dict
+    PENDING_EDGE_OPS: dict
+    RELAY_EDGE_PEERS: dict
+    DISABLED_TOOLS: set[str]
+    CONFIRMATION_TOOLS: set[str]
+    ALWAYS_ALLOWED_TOOLS: set[str]
+    PENDING_CONFIRMATIONS: dict
+    SESSION_LOCKS: dict
+    TIMER_TASKS: dict
+    TIMER_SUBSCRIBERS: dict
+    bot: Any
+    proactive_service: Any
+    RELAY_CLIENT: Any
+    server_draining: bool
+
 
 logger = get_logger(__name__)
 
@@ -41,11 +64,11 @@ _RUNTIME_ATTR_MAP: dict[str, tuple[str, ...]] = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     path = _RUNTIME_ATTR_MAP.get(name)
     if path is None:
         raise AttributeError(f"module 'mirai.core.api.state' has no attribute {name!r}")
-    obj = _runtime
+    obj: Any = _runtime
     for part in path:
         obj = getattr(obj, part)
     return obj
