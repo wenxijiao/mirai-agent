@@ -51,6 +51,28 @@ python -m build
 
 Forks and contributors without these secrets will not run the publish steps.
 
+## Repository administration (maintainers)
+
+Settings to apply in the GitHub web UI after forking or migrating the repository:
+
+**About panel** — keep the description as `One API to let AI call functions in any language, on any device.` and use the topics:
+
+```
+ai-agent, tool-calling, multi-language, edge-computing, llm, iot,
+function-calling, raspberry-pi, swift, typescript, cpp, python,
+ai-tools, websocket, local-first
+```
+
+**Social preview** — `assets/social-preview.png` is embedded in [`README.md`](README.md) for the project home page, but GitHub does **not** read social previews from the repo automatically. For link unfurls on social platforms, also upload it manually under **Settings → General → Social preview → Edit → Upload an image**.
+
+**Recommended toggles:**
+
+- **Releases** — create one for each version tag (`v0.1.0`, etc.).
+- **Discussions** — enable for community Q&A.
+- **Wiki** — disable (documentation lives in [`docs/`](docs/)).
+- **Sponsorship** — enable if applicable.
+- **Pages** — optional landing page using `docs/` content.
+
 ## Code style
 
 - Prefer matching existing patterns in the file you edit.

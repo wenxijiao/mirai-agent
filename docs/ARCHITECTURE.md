@@ -217,9 +217,3 @@ Mirai is in the **0.x** stage. The interfaces intended for users to build on are
 - The SDKs and templates under [`mirai/sdk/`](../mirai/sdk/README.md) and `mirai --edge`.
 
 Internal Python modules such as `mirai.core.dispatch.*`, `mirai.core.memories.repos.*`, and `mirai.core.api.routers.*` are implementation details and may change between releases. Breaking changes to user-facing surfaces are called out in the changelog and release notes.
-
-## How Mirai Differs
-
-Mirai is **local-first**: it ships a runnable server, terminal UI, and Reflex web UI, plus **first-class edge tool hosts** (multi-language SDKs) so your game, app, or device can expose tools from its own process. It is not only a Python library for chaining LLM calls; the focus is on **operable defaults** and **device-side** tool execution.
-
-For remote access, users typically pair the server with Tailscale or similar. An optional **Relay** mode (enterprise) exists for pairing flows. See [HTTP_API.md](HTTP_API.md) and [UPGRADING_TO_ENTERPRISE.md](UPGRADING_TO_ENTERPRISE.md).

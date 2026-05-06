@@ -266,6 +266,31 @@ When a timer fires for a Telegram session (`tg_<user_id>`), the **API process** 
 - If messages fail, check server logs -- Telegram often returns HTTP 200 with `ok: false` (e.g. user blocked the bot, wrong chat_id). Run with `MIRAI_LOG_LEVEL=DEBUG` for details.
 - **Delayed actions** ("in 1 minute do X") only work if the model actually calls the `set_timer` / `schedule_task` tool. Plain text promises do nothing. Check with `MIRAI_LOG_LEVEL=INFO` -- you should see `Tool call: set_timer session_id=...` in the logs. If not, try rephrasing or using a model with stronger tool-use support.
 
+## LINE
+
+Mirai exposes `POST /line/webhook`, verifies `X-Line-Signature`, and forwards chat to the same `POST /chat` NDJSON flow as Telegram. Tool confirmations use **Flex** messages with postback buttons. Sessions are keyed by `line_<user_id>`.
+
+### Setup
+
+1. Create a Messaging API channel in the [LINE Developers Console](https://developers.line.biz/) and copy the channel secret + channel access token.
+2. Configure credentials (any one of the following):
+   - Set environment variables `LINE_CHANNEL_SECRET` and `LINE_CHANNEL_ACCESS_TOKEN`
+   - Add `"line_channel_secret"` and `"line_channel_access_token"` to `~/.mirai/config.json`
+   - Run `mirai --server --line` or `mirai --line` without credentials set -- Mirai will prompt and save them
+3. Optionally restrict access via `LINE_ALLOWED_USER_IDS` or `"line_allowed_user_ids"` in config.
+
+### Running
+
+- **`mirai --server --line`** (recommended) -- starts the API and a webhook server on `LINE_BOT_PORT` (default `8788`). Set the LINE channel webhook URL to `https://<your-host>:8788/line/webhook` (TLS required in production).
+- **`MIRAI_LINE_INCORE=1`** -- mounts `POST /line/webhook` on the **same** FastAPI app as the core API (single port). Still configure credentials on the API process so timer pushes work.
+- **`mirai --line`** -- webhook sidecar only; point `MIRAI_SERVER_URL` at your core API.
+
+### Behaviour notes
+
+- `/clear`, `/model`, and `/system` work the same as Telegram.
+- `LINE_DISABLE_PUSH=1` suppresses outbound push messages while testing.
+- Like Telegram, timer pushes require the bot credentials to be present on the machine running `mirai --server`.
+
 ## Data Storage
 
 | Path | Contents |
