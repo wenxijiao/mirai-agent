@@ -134,6 +134,7 @@ Your app connects to the Mirai server over WebSocket and registers functions as 
 | `mirai --telegram` | Run only the Telegram bot; connects to the API like `mirai --chat` |
 | `mirai --server --line` | Start the API and a LINE webhook sidecar (default port 8788) |
 | `mirai --line` | Run only the LINE webhook server; core API must already be reachable |
+| `mirai --server --voice` | Start the API with a microphone wake-word loop (say "hi mirai" to talk) |
 | `mirai --ui` | Start the web UI (chat, tools, settings) |
 | `mirai --chat` | Start terminal chat |
 | `mirai --edge` | Scaffold an edge workspace in the current directory |
@@ -147,6 +148,7 @@ Your app connects to the Mirai server over WebSocket and registers functions as 
 
 - **Telegram** — chat with Mirai from a Telegram bot. Get a token from [@BotFather](https://t.me/BotFather), then run `mirai --server --telegram` (single machine) or `mirai --telegram` (bot only). Token, allowlist, and timer-push details: [Configuration → Telegram](docs/CONFIGURATION.md#telegram).
 - **LINE** — chat from LINE via the Messaging API webhook. Run `mirai --server --line` (single machine, default port 8788) or `mirai --line` (webhook sidecar only). Credentials and webhook setup: [Configuration → LINE](docs/CONFIGURATION.md#line).
+- **Voice** — talk to Mirai through your microphone. Say the wake word ("hi mirai") and Mirai transcribes the rest of your sentence with Whisper and runs it as a chat turn. Coexists with Telegram / `--chat` / `--ui` so the same Mirai instance can listen and type at once, and recent voice/Telegram/CLI turns are merged into each prompt. Requires `pip install mirai-agent[voice,stt]` plus a Picovoice access key. Setup: [Configuration → Voice](docs/CONFIGURATION.md#voice).
 
 ## Supported Providers
 

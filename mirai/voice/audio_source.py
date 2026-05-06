@@ -41,9 +41,7 @@ class SoundDeviceSource:
         try:
             import sounddevice as sd  # noqa: F401
         except ImportError as exc:  # pragma: no cover - import-time guard
-            raise RuntimeError(
-                "sounddevice is not installed. Install with: pip install mirai-agent[voice]"
-            ) from exc
+            raise RuntimeError("sounddevice is not installed. Install with: pip install mirai-agent[voice]") from exc
         self.sample_rate = int(sample_rate)
         self.frame_length = int(frame_length)
         self.device = device

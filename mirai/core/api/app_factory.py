@@ -117,10 +117,7 @@ async def lifespan(app: FastAPI):
             from mirai.voice.runtime import _warm_whisper_once, start_voice_loop
 
             voice_owner = (
-                os.environ.get("MIRAI_VOICE_OWNER_ID")
-                or config.voice_owner_id
-                or os.getenv("USER")
-                or "default"
+                os.environ.get("MIRAI_VOICE_OWNER_ID") or config.voice_owner_id or os.getenv("USER") or "default"
             ).strip() or "default"
             await _warm_whisper_once()
 

@@ -30,9 +30,7 @@ def _resolve_access_key(explicit: str | None) -> str:
     env = (os.getenv("PV_ACCESS_KEY") or "").strip()
     if env:
         return env
-    raise RuntimeError(
-        "Picovoice access key missing. Set PV_ACCESS_KEY or voice_porcupine_access_key in config."
-    )
+    raise RuntimeError("Picovoice access key missing. Set PV_ACCESS_KEY or voice_porcupine_access_key in config.")
 
 
 class PorcupineWake:
@@ -48,9 +46,7 @@ class PorcupineWake:
         try:
             import pvporcupine  # noqa: F401
         except ImportError as exc:  # pragma: no cover - import-time guard
-            raise RuntimeError(
-                "pvporcupine is not installed. Install with: pip install mirai-agent[voice]"
-            ) from exc
+            raise RuntimeError("pvporcupine is not installed. Install with: pip install mirai-agent[voice]") from exc
         import pvporcupine
 
         key = _resolve_access_key(access_key)

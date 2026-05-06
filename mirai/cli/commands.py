@@ -343,10 +343,7 @@ def validate_cross_command_flags(args: argparse.Namespace) -> str | None:
 
     if getattr(args, "voice", False):
         if any(getattr(args, flag, False) for flag in _NON_SERVER_BASE_FLAGS):
-            return (
-                "Cannot combine --voice with --ui/--chat/--edge/--demo/"
-                "--setup/--config/--cleanup/--tool-routing."
-            )
+            return "Cannot combine --voice with --ui/--chat/--edge/--demo/--setup/--config/--cleanup/--tool-routing."
         if getattr(args, "line", False):
             return "Cannot combine --voice with --line."
         if not getattr(args, "server", False):

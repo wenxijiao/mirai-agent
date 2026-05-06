@@ -43,6 +43,7 @@ def _peer_session_ids(session_id: str) -> list[str]:
             return [p + owner for p in _CHANNEL_PREFIXES if (p + owner) != session_id]
     return []
 
+
 _UPLOAD_ANY_PATH_RE = re.compile(r"(/[^\s\n]+?\.mirai/uploads/[^\s\n]+)", re.IGNORECASE)
 
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico"})

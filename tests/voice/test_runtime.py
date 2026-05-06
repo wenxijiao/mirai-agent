@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import wave
 
 from mirai.voice.audio_source import FakeAudioSource
 from mirai.voice.runtime import pcm_to_wav_bytes, run_voice_session
@@ -84,10 +86,7 @@ def test_run_voice_session_dispatches_after_wake_and_silence():
 def test_pcm_to_wav_bytes_roundtrip():
     pcm = b"\x10\x00" * 100
     wav = pcm_to_wav_bytes(pcm, sample_rate=16000)
-    import wave
-    import io as _io
-
-    with wave.open(_io.BytesIO(wav), "rb") as wf:
+    with wave.open(io.BytesIO(wav), "rb") as wf:
         assert wf.getnchannels() == 1
         assert wf.getsampwidth() == 2
         assert wf.getframerate() == 16000

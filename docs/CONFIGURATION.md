@@ -95,6 +95,18 @@ Speech-to-text fields:
 - `stt_model_dir`: Optional model cache directory. `null` uses Mirai's default.
 - `stt_language`: Language hint. Default: `auto`.
 
+Voice (microphone wake-word) fields — only consulted when running `mirai --server --voice`:
+
+- `voice_wake_word`: Wake phrase shown in banner output. Default: `hi mirai`. The actual matcher is the `.ppn` model below.
+- `voice_porcupine_access_key`: Picovoice access key. Environment variable: `PV_ACCESS_KEY`.
+- `voice_porcupine_keyword_path`: Filesystem path to a `.ppn` keyword file trained at [console.picovoice.ai](https://console.picovoice.ai/). When `null`, Mirai falls back to the built-in `jarvis` keyword (loud warning at startup).
+- `voice_porcupine_sensitivity`: Wake-word sensitivity, `0.0`–`1.0`. Higher catches more but false-fires more. Default: `0.5`.
+- `voice_input_device`: Optional `sounddevice` device index. `null` uses the OS default microphone.
+- `voice_vad_aggressiveness`: WebRTC VAD aggressiveness, `0`–`3`. Higher is stricter about classifying frames as speech. Default: `2`.
+- `voice_silence_ms`: Trailing silence (ms) that ends an utterance. Default: `800` (minimum `100`).
+- `voice_max_utterance_ms`: Hard cap (ms) for one utterance, even without silence. Default: `15000` (minimum `1000`).
+- `voice_owner_id`: Stable identifier for the voice session id (`voice_<owner>`). Set this to your Telegram user id to interleave voice and Telegram turns in each prompt. `null` falls back to `$USER`.
+
 Chat NDJSON tracing (optional): from Telegram (`/start_log` / `/end_log`), LINE, `mirai --chat`, or `PUT /config/chat-debug`, the server appends one line per JSON record to `MIRAI_DEBUG_DIR/chat_trace/<session>/....ndjson` for that qualified `session_id`. Logs may contain prompts, model output, and tool args (privacy: do not share). State is in-memory only (restart clears active tracing).
 
 ## Environment Variables
@@ -235,6 +247,14 @@ mirai --tool-routing --enable-edge-tool-routing --edge-tools-limit 20
 | `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) (optional Telegram bridge) |
 | `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated Telegram user IDs allowed to use the bot; empty = no restriction |
 
+### Voice
+
+| Variable | Description |
+|---|---|
+| `MIRAI_VOICE_ENABLED` | Set automatically by `mirai --server --voice`. `1` makes the API lifespan start the wake-word loop; you should not normally set this by hand. |
+| `MIRAI_VOICE_OWNER_ID` | Same as `voice_owner_id` in config. Set automatically by the CLI helpers. |
+| `PV_ACCESS_KEY` | Picovoice access key. Overrides `voice_porcupine_access_key` when both are set. |
+
 ## Telegram
 
 Telegram-related dependencies (`python-telegram-bot`, `httpx`) are included in the default install; no optional extras are required.
@@ -290,6 +310,52 @@ Mirai exposes `POST /line/webhook`, verifies `X-Line-Signature`, and forwards ch
 - `/clear`, `/model`, and `/system` work the same as Telegram.
 - `LINE_DISABLE_PUSH=1` suppresses outbound push messages while testing.
 - Like Telegram, timer pushes require the bot credentials to be present on the machine running `mirai --server`.
+
+## Voice
+
+`mirai --server --voice` attaches a microphone wake-word session to the running API. After the wake word ("hi mirai") fires, Mirai records until you pause, transcribes with the configured Whisper model, and sends the transcript through the same `/chat` flow used by `--chat` / `--ui` / Telegram. v1 produces text replies only; the operator sees them in server logs.
+
+### Install
+
+```bash
+pip install -e ".[voice,stt]"
+```
+
+This pulls in `sounddevice` (mic capture), `webrtcvad-wheels` (voice activity detection), `pvporcupine` (wake-word), and `faster-whisper` (transcription). Whisper weights are downloaded the first time you run `mirai --setup` and pick a model.
+
+### Setup
+
+1. **Picovoice access key** — sign up at [console.picovoice.ai](https://console.picovoice.ai/) (free for personal use) and copy your access key. Either:
+   - export `PV_ACCESS_KEY=...` in the shell that launches Mirai, or
+   - save `voice_porcupine_access_key` in `~/.mirai/config.json`.
+2. **Train a "hi mirai" wake-word** — Picovoice's built-in keywords do not include "hi mirai". In the console, create a custom keyword for English (or your language), download the resulting `.ppn` file, and save it (suggested: `~/.mirai/voice/hi-mirai.ppn`). Set `voice_porcupine_keyword_path` to that path. Without a custom file, Mirai falls back to the built-in `jarvis` keyword and prints a warning at startup.
+3. **Microphone permission** — on macOS, grant your terminal app microphone access in *System Settings → Privacy & Security → Microphone*. Without permission, `sounddevice` returns silent audio and the VAD never triggers.
+4. **Tune `voice_owner_id`** — set this to a stable identifier (your Telegram user id is a good choice). The voice session id is `voice_<owner_id>`; matching the suffix with `tg_<id>` / `chat_<id>` is what makes cross-channel context (below) work.
+
+### Running
+
+- **`mirai --server --voice`** — API + voice loop in one process tree. The CLI sets `MIRAI_VOICE_ENABLED=1` and `MIRAI_VOICE_OWNER_ID` for the API child process; the API lifespan starts a background asyncio task for the loop and cancels it on shutdown.
+- **`mirai --server --telegram --voice`** — same, plus the Telegram bot. All three (API, bot, voice) live in the same process tree and are stopped together by `Ctrl+C`.
+
+### Cross-channel context
+
+Voice / Telegram / `--chat` each persist to their own session (`voice_alice`, `tg_alice`, `chat_alice`). Each chat turn fetches the most recent N messages from the **current** session **plus** any sibling sessions that share the owner suffix, merges them by timestamp, and renders sibling turns with a `(via voice)` / `(via telegram)` / `(via chat)` tag so the model can distinguish channels. `mirai --chat` uses random UUID session ids by default, so its history is included only when you pass an explicit `session_id` matching the voice owner.
+
+The merge happens in `mirai/core/memories/context.py::ContextBuilder._recent_transcript`. The cap is roughly twice `memory_max_recent_messages` after merge to keep peers from crowding out the current channel. There is no schema change — peer messages are read with a single `session_id IN (...)` query against the existing `chat_history` LanceDB table.
+
+### Voice loop details
+
+- **Frame size** — 16 kHz mono int16; Porcupine picks the frame length (typically 32 ms / 512 samples) and the same blocks are sliced into 30 ms windows for WebRTC VAD.
+- **End-of-utterance** — flush on `voice_silence_ms` of trailing silence, or `voice_max_utterance_ms` total length, whichever first.
+- **Whisper warm-up** — the API lifespan transcribes 1 s of silence at boot, so the first real utterance does not pay the full cold-start delay.
+- **Errors** — transcription / dispatch errors are logged and swallowed; the loop keeps listening. `KeyboardInterrupt` (Ctrl+C) cleanly stops the audio stream and closes the Porcupine handle.
+
+### v1 limits
+
+- Text reply only (no TTS, no voice → Telegram bridge).
+- Single owner per server instance — multiple humans sharing a microphone all get the same `voice_<owner>` session.
+- macOS / Linux desktop only. Docker has no microphone, and voice cannot run on a remote `--server`.
+- No barge-in. The model finishes its turn before the next utterance is processed.
 
 ## Data Storage
 
