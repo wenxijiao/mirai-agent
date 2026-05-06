@@ -2,8 +2,9 @@
 
 import json
 
-import mirai.core.api.routes as api
+import mirai.core.api.routers.chat as chat_router_module
 from fastapi.testclient import TestClient
+from mirai.core.api.app_factory import app
 
 
 def test_chat_endpoint_streams_ndjson(monkeypatch):
@@ -14,9 +15,9 @@ def test_chat_endpoint_streams_ndjson(monkeypatch):
         yield {"type": "text", "content": "Hi there"}
         yield {"type": "tool_status", "status": "success", "content": "timer finished"}
 
-    monkeypatch.setattr(api, "generate_chat_events", fake_generate_chat_events)
+    monkeypatch.setattr(chat_router_module, "generate_chat_events", fake_generate_chat_events)
 
-    client = TestClient(api.app)
+    client = TestClient(app)
     response = client.post("/chat", json={"prompt": "Hello", "session_id": "s1", "think": True})
 
     assert response.status_code == 200

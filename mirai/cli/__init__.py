@@ -23,7 +23,7 @@ from mirai.core.config import (
     get_telegram_bot_token,
     load_model_config,
     load_saved_model_config,
-    run_model_setup,
+    run_model_setup,  # noqa: F401 — re-exported for `mirai.cli.commands.SetupCommand`
     save_connection_code,
     save_line_channel_access_token,
     save_line_channel_secret,
@@ -878,6 +878,14 @@ def _open_path_with_default_app(path: Path) -> bool:
 
 
 def main():
+    """CLI entry point (`mirai = "mirai.cli:main"` in pyproject.toml).
+
+    Implementation lives in :mod:`mirai.cli.commands` (one ``Command`` class
+    per sub-command) and :mod:`mirai.cli.registry`. This function only owns
+    the .env load, parser construction, cross-command validation, and the
+    keyboard-interrupt safety net.
+    """
+    from mirai.cli.commands import build_default_registry, validate_cross_command_flags
     from mirai.core.env_load import load_mirai_dotenv
 
     load_mirai_dotenv()
@@ -886,117 +894,27 @@ def main():
         description="Mirai command line interface",
         epilog="OSS edition: local / LAN single-user. Multi-tenant + remote relay live in mirai-enterprise.",
     )
-
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--server", action="store_true", help="Run the Mirai backend server")
-    group.add_argument("--ui", action="store_true", help="Open the Mirai web UI")
-    group.add_argument("--chat", action="store_true", help="Start chat in terminal")
-    group.add_argument("--edge", action="store_true", help="Initialize a Mirai Edge workspace")
-    parser.add_argument(
-        "--lang",
-        action="append",
-        dest="langs",
-        metavar="LANG",
-        default=None,
-        help=(
-            "Language(s) for --edge (repeatable). "
-            "Examples: --lang rust --lang python   or   --lang rust,python. "
-            "Default: scaffold all languages."
-        ),
-    )
-    group.add_argument("--demo", action="store_true", help="Run the Smart Home + Planner (schedule) demo")
-    group.add_argument("--setup", action="store_true", help="Configure Mirai models")
-    group.add_argument("--config", action="store_true", help="Create/show the full ~/.mirai/config.json settings file")
-    group.add_argument("--tool-routing", action="store_true", help="Show or configure edge tool routing")
-    group.add_argument("--cleanup", action="store_true", help="Delete Mirai user data")
-    group.add_argument("--cleanup-memory", action="store_true", help="Delete Mirai memory only")
-    parser.add_argument(
-        "--edge-tools-limit",
-        type=int,
-        default=None,
-        metavar="N",
-        help="With --tool-routing: edge tool schemas exposed per turn (0-200, default 20)",
-    )
-    parser.add_argument(
-        "--enable-edge-tool-routing",
-        action="store_true",
-        help="With --tool-routing: rank and cap edge tools per turn",
-    )
-    parser.add_argument(
-        "--disable-edge-tool-routing",
-        action="store_true",
-        help="With --tool-routing: pass all enabled edge tools through",
-    )
-    parser.add_argument(
-        "--telegram",
-        action="store_true",
-        help="Run Telegram bot (with --server: same process after API starts; alone: client like --chat)",
-    )
-    parser.add_argument(
-        "--line",
-        action="store_true",
-        help="Run LINE webhook sidecar (with --server: after API starts; use MIRAI_LINE_INCORE=1 to mount webhook on core instead)",
-    )
+    registry = build_default_registry()
+    registry.install(parser)
 
     args = parser.parse_args()
-
     configure_logging()
 
-    if args.telegram and args.line:
-        raise SystemExit("  Use either --telegram or --line, not both.")
-    if not args.tool_routing and (
-        args.edge_tools_limit is not None or args.enable_edge_tool_routing or args.disable_edge_tool_routing
-    ):
-        raise SystemExit(
-            "  Use --edge-tools-limit/--enable-edge-tool-routing/--disable-edge-tool-routing with --tool-routing."
-        )
+    err = validate_cross_command_flags(args)
+    if err:
+        raise SystemExit(f"  {err}")
 
-    if (args.telegram or args.line) and (
-        args.ui
-        or args.chat
-        or args.edge
-        or args.demo
-        or args.setup
-        or args.config
-        or args.cleanup
-        or args.cleanup_memory
-        or args.tool_routing
-    ):
-        raise SystemExit(
-            "  Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/--setup/--config/--cleanup/--tool-routing."
-        )
+    command = registry.select(args)
+    if command is None:
+        parser.print_help()
+        return
+
+    err = command.validate(args)
+    if err:
+        raise SystemExit(f"  {err}")
 
     try:
-        if args.server and args.telegram:
-            run_server_with_telegram()
-        elif args.server and args.line:
-            run_server_with_line()
-        elif args.server:
-            run_server()
-        elif args.telegram:
-            run_telegram_standalone()
-        elif args.line:
-            run_line_standalone()
-        elif args.setup:
-            run_model_setup(force=True)
-        elif args.config:
-            run_config_file()
-        elif args.tool_routing:
-            run_tool_routing_config(args)
-        elif args.cleanup:
-            run_cleanup()
-        elif args.cleanup_memory:
-            run_cleanup_memory()
-        elif args.ui:
-            run_ui()
-        elif args.chat:
-            run_chat()
-        elif args.edge:
-            run_edge(lang=_parse_edge_langs(args.langs))
-        elif args.demo:
-            _run_demo()
-        else:
-            parser.print_help()
+        command.run(args)
     except KeyboardInterrupt:
         print("\n  Shutting down Mirai.\n")
 

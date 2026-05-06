@@ -130,12 +130,6 @@ def cleanup_edge_connection(connection_key: str, peer):
 
 
 async def handle_edge_peer(peer):
-    from mirai.core.services.edge_service import EdgeService
-
-    await EdgeService().handle_peer(peer)
-
-
-async def _handle_edge_peer_impl(peer, *, runtime=None):  # noqa: ARG001 - migration hook for explicit runtime injection
     """OSS edge peer loop: LAN-only, no per-user tenancy.
 
     Enterprise builds wrap this loop (or replace ``ws/edge`` entirely) to add

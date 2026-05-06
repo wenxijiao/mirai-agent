@@ -8,30 +8,158 @@ flowchart LR
     CLI[CLI_Package]
     UI[Web_UI]
     Edge[Edge_SDKs]
+    LINE[LINE_bridge]
+    TG[Telegram_bot]
   end
   subgraph server [Mirai_Server]
-    API[FastAPI_routes]
+    App[FastAPI_app_factory]
+    Routers[routers_*]
+    Service[ChatTurnService]
+    Dispatch[dispatch_*]
     Plugins[core_plugins_ports]
     Bot[MiraiBot]
-    Prompts[core_prompts]
-    Cfg[core_config_pkg]
-    Mem[Memory_LanceDB]
+    Mem[Memory_facade]
+    Repos[memory_repos_*]
     Prov[core_providers]
   end
-  CLI --> API
-  UI --> API
-  Edge -->|WebSocket| API
-  API --> Plugins
-  API --> Bot
-  API --> Mem
-  API --> Prompts
-  API --> Cfg
-  Bot --> Prompts
+  CLI --> App
+  UI --> App
+  LINE --> App
+  TG --> App
+  Edge -->|WebSocket| App
+  App --> Routers
+  Routers --> Service
+  Service --> Dispatch
+  Service --> Bot
   Bot --> Mem
+  Mem --> Repos
+  Service --> Plugins
+  Routers --> Plugins
   Bot --> Prov
 ```
 
-Internal layout (Python): `mirai/core/prompts/` (defaults, persisted prompts, `compose_messages`), `mirai/core/config/` (paths, `ModelConfig`, store, credentials, setup wizard), `mirai/core/memories/` (`Memory`, constants, tool replay, embedding state), `mirai/core/streaming/` (reasoning tag parser), `mirai/core/api/http_helpers.py` for HTTP helpers, `mirai/core/plugins/` for the extension port layer (identity, quota, billing, session scope, bot pool, memory factory, edge scope, audit, route extender, middleware extender), `mirai/tools/bootstrap.py` to register local tools (`init_mirai`).
+Mirai is **local-first**: it ships a runnable server, terminal UI, Reflex web UI, and first-class edge-tool hosts so your game, app, or device can expose tools from its own process. The same FastAPI app accepts traffic from local clients (loopback HTTP), the LINE/Telegram bridges, and — in enterprise builds — relay frames forwarded from a public gateway.
+
+## HTTP Entry Layer
+
+`mirai/core/api/app_factory.py` is the single source of truth for HTTP composition. It owns:
+
+* Process lifespan (`init_mirai`, model-config preflight, bot warm-up, signal handlers, relay drain on SIGTERM, proactive-message service).
+* CORS, docs-access middleware, and any middleware contributed by the [`MiddlewareExtender`](#plugin-ports) plugin port.
+* Mounting every resource router under `mirai/core/api/routers/`. Each router file owns one resource group:
+
+  | Router | Resource |
+  |---|---|
+  | `chat.py` | `POST /chat` (NDJSON streaming), `POST /clear`, `PUT/GET /config/chat-debug` |
+  | `config.py` | `GET/PUT /config/{model,system-prompt,session-prompt,ui}` |
+  | `edge.py` | `WS /ws/edge` |
+  | `health.py` | `GET /health` |
+  | `memory.py` | sessions and messages CRUD |
+  | `monitor.py` | `GET /monitor/{topology,traces}` |
+  | `stt.py` | `POST /stt/transcribe` |
+  | `timers.py` | `GET /timer-events` (NDJSON) |
+  | `tools.py` | tool listing and confirmation policy |
+  | `uploads.py` | `POST /uploads` |
+
+There are no compatibility shims, no `sys.modules` indirection, and no router file mirroring routes for relay — adding a new endpoint is a one-router edit.
+
+### Relay (enterprise)
+
+The enterprise relay client (`mirai_enterprise.relay_client.RelayClient`) receives `relay_http_request` frames from the public gateway and forwards them through `mirai_enterprise.relay_http_dispatch`. That module is now a transparent **ASGI proxy**:
+
+1. Verifies the relay credential against a small path-prefix → required-scopes table.
+2. Binds the per-user `Identity` via `set_current_identity` so OSS plugin ports see the right user.
+3. Synthesises an ASGI `(scope, receive, send)` triple (with an `X-Mirai-Source: relay` header) and dispatches through the OSS `app_factory.app` directly.
+
+`TenancyAuthMiddleware` recognises the relay marker and skips token validation (the relay handler has already done it). Streaming responses (`/chat` NDJSON) are forwarded chunk-by-chunk through the proxy's `send` callable. Adding a new HTTP route in OSS reaches the relay automatically — zero per-route mirroring.
+
+## Chat Turn Pipeline
+
+`POST /chat` flows through five well-separated layers:
+
+```
+routers/chat.py    — quota check + audit + StreamingResponse envelope
+core/api/chat.py   — facade: yields wire-format dicts (legacy contract)
+services/chat_turn.py — ChatTurnService orchestrator (~400 lines, state machine)
+core/dispatch/*    — domain pipeline (one collaborator per concern)
+core/runtime/*     — mutable state registries (locks, edge peers, tool policy, ...)
+```
+
+`ChatTurnService.stream_chat_turn` is a small state machine; every per-turn concern lives in `core/dispatch/`:
+
+| Module | Responsibility |
+|---|---|
+| `dispatch/context.py` | `TurnContext` value object, `ToolInvocation`, `ToolResult` |
+| `dispatch/trace_sink.py` | `ChatTraceSink` — debug-trace recording, diagnostic file writes |
+| `dispatch/usage.py` | `UsageRecorder` context manager — token totals + quota persistence |
+| `dispatch/normalizer.py` | `ToolCallNormalizer` — model-emit normalisation + retry budget |
+| `dispatch/confirmation.py` | `ConfirmationGate` — user confirmation flow + always-allow persistence |
+| `dispatch/local.py` | `LocalToolExecutor` — registered local tool runner with timeout |
+| `dispatch/edge.py` | `EdgeToolExecutor` — WebSocket RPC to an edge peer |
+| `dispatch/dispatcher.py` | `ToolDispatcher` — argument parsing, classification, parallel run |
+
+The orchestrator yields `ChatEvent` model instances (see below); the `core/api/chat.py` facade serialises them to dicts at the public boundary so existing dict-shaped consumers (LINE bridge, timer callback, SDK clients) keep working unchanged.
+
+## Chat Event Protocol
+
+The `/chat` NDJSON stream is a **discriminated Pydantic union** keyed by `type` (`mirai/core/api/events.py`):
+
+```python
+ChatEvent = Annotated[
+    Union[TextEvent, ThoughtEvent, ToolStatusEvent, ToolConfirmationEvent, ErrorEvent],
+    Field(discriminator="type"),
+]
+```
+
+The wire format is unchanged — `model_dump()` produces the same JSON the legacy code did — but producers and consumers can opt into typed dispatch via `parse_chat_event()` and `serialize_chat_event()`. Adding a new event type is one model + one `case` in `mirai/core/api/stream_consumer.py`; every existing channel adapter inherits a no-op default until it explicitly opts in.
+
+## Channel Adapters
+
+Channel-specific rendering (LINE, Telegram, terminal CLI, future Discord/Slack/WhatsApp) implements the `ChannelHandler` Protocol from `mirai/core/api/stream_consumer.py`:
+
+```python
+class ChannelHandler(Protocol):
+    async def on_text(self, event: TextEvent) -> None: ...
+    async def on_thought(self, event: ThoughtEvent) -> None: ...
+    async def on_tool_status(self, event: ToolStatusEvent) -> None: ...
+    async def on_tool_confirmation(self, event: ToolConfirmationEvent) -> None: ...
+    async def on_error(self, event: ErrorEvent) -> None: ...
+```
+
+`consume_chat_stream(stream, handler)` iterates a chat stream and dispatches each event to the right handler method. Concrete handlers (`_LineChatHandler`, `_TelegramChatHandler`) implement only the methods they care about and inherit no-op defaults from `BaseChannelHandler`. New channels are typically a 5-method handler plus a thin entry-point function.
+
+## Memory Layer
+
+`mirai/core/memories/` exposes a single public class — `Memory` — which is a **façade** over focused collaborators:
+
+```
+memories/
+├── memory.py              # Memory façade (delegates to the collaborators below)
+├── backend.py             # LanceDBBackend: connection cache, table helpers, time/SQL primitives
+├── embedding_runner.py    # EmbeddingProcessor: dim migration + background re-embed
+└── repos/
+    ├── messages.py        # MessageRepository (chat_history)
+    ├── sessions.py        # SessionRepository (chat_sessions)
+    ├── long_term.py       # LongTermMemoryRepository (long_term_memories)
+    ├── observations.py    # ToolObservationRepository (tool_observations)
+    └── summaries.py       # SessionSummaryRepository (session_summaries)
+```
+
+`Memory(...)` keeps its historical signature and every public method (`add_message`, `create_message`, `list_sessions`, …); each one delegates to the appropriate repository. Legacy private helpers (`_has_table`, `_open_table`, `_build_where_clause`, …) are preserved as instance methods so external collaborators (`memories/context.py`, `memories/storage.py`, `memories/writer.py`, enterprise per-user memory) keep functioning unchanged.
+
+The split exists so the enterprise PostgreSQL backend (`mirai_enterprise.tenancy.postgres_store`) can implement the same Repository surface without rewriting the façade. See [`MEMORY.md`](MEMORY.md) for the on-disk layout and retrieval semantics.
+
+## CLI
+
+The CLI is a **Command Pattern + Registry** in `mirai/cli/`:
+
+| File | Responsibility |
+|---|---|
+| `cli/__init__.py` | `main()` entry point (~30 lines) plus the `run_*` helper functions each command calls |
+| `cli/registry.py` | `Command` ABC + `CommandRegistry` |
+| `cli/commands.py` | One `Command` subclass per sub-command, plus `validate_cross_command_flags` |
+
+`main()` builds the default registry (12 commands in OSS), mounts each command's argparse flags, runs cross-command validation, then dispatches. Adding a sub-command is one `Command` subclass + one `registry.add(...)` line — no four-place edit. Enterprise plugins inject extra sub-commands via the [`AdminCli`](#plugin-ports) plugin port, so `mirai --enterprise-action` lives in the same CLI namespace as OSS commands.
 
 ## Server-Side Tools
 
@@ -43,7 +171,25 @@ Edge tools are registered by remote clients over WebSocket at `/ws/edge`. Each c
 
 Core server tools are loaded into every model request when enabled. Edge tools are routed dynamically: for each chat turn, Mirai builds retrieval documents from the Edge name, aliases, tool name, description, and parameter descriptions, embeds them with the configured embedding model, and sends only the most relevant Edge tool schemas to the provider (default: 20). This keeps the model-facing tool set small even when many Edge processes register hundreds of functions.
 
-When the LLM selects an edge tool, the server sends a `tool_call` message to the relevant client. The client executes the function and returns a `tool_result`.
+When the LLM selects an edge tool, `EdgeToolExecutor` sends a `tool_call` message to the relevant client. The client executes the function and returns a `tool_result`. Cancellation, timeout, and disconnection are handled inside the executor; the orchestrator never sees raw WebSocket frames.
+
+## Plugin Ports
+
+`mirai/core/plugins/ports.py` declares the protocols every commercial / enterprise build implements. The OSS core MUST only depend on these abstractions — never import anything from a commercial package directly.
+
+| Port | OSS default | Enterprise replacement |
+|---|---|---|
+| `IdentityProvider` | `LocalIdentityProvider` (single user) | `MultiTenantIdentityProvider` |
+| `QuotaPolicy` | no-op | `PostgresQuotaPolicy` |
+| `BillingHook` | returns 0.0 | `RoughUsdBilling` |
+| `SessionScope` | identity transparent | `PerUserSessionScope` |
+| `BotPool` | shared singleton | `PerUserBotPool` |
+| `MemoryFactory` | `SharedMemoryFactory` | `PerUserMemoryFactory` |
+| `EdgeScope` | name = key | `PerUserEdgeScope` |
+| `AuditSink` | log only | `PostgresAuditSink` |
+| `RouteExtender` | none | mounts `/admin`, `/auth`, `/tenancy/...` |
+| `MiddlewareExtender` | none | adds `TenancyAuthMiddleware` |
+| `AdminCli` | none | injects `mirai-enterprise --xxx` sub-commands |
 
 ## Admin API
 
@@ -65,14 +211,15 @@ For HTTP details (chat NDJSON stream, Relay `/v1/*` mapping, curl examples), see
 
 Mirai is in the **0.x** stage. The interfaces intended for users to build on are:
 
-- The `mirai` CLI
-- The documented HTTP routes in [HTTP_API.md](HTTP_API.md)
-- The SDKs and templates under [`mirai/sdk/`](../mirai/sdk/README.md) and `mirai --edge`
+- The `mirai` CLI (sub-commands and flags documented in `mirai --help`).
+- The documented HTTP routes in [HTTP_API.md](HTTP_API.md).
+- The `ChatEvent` schema in `mirai/core/api/events.py` and the `ChannelHandler` protocol in `mirai/core/api/stream_consumer.py` (for non-Python channel adapters or external SDK clients that want typed events).
+- The SDKs and templates under [`mirai/sdk/`](../mirai/sdk/README.md) and `mirai --edge`.
 
-Internal Python modules such as `mirai.core.*` and `mirai.tools.*` are implementation details and may change between releases. Breaking changes to user-facing surfaces are called out in the changelog and release notes.
+Internal Python modules such as `mirai.core.dispatch.*`, `mirai.core.memories.repos.*`, and `mirai.core.api.routers.*` are implementation details and may change between releases. Breaking changes to user-facing surfaces are called out in the changelog and release notes.
 
 ## How Mirai Differs
 
 Mirai is **local-first**: it ships a runnable server, terminal UI, and Reflex web UI, plus **first-class edge tool hosts** (multi-language SDKs) so your game, app, or device can expose tools from its own process. It is not only a Python library for chaining LLM calls; the focus is on **operable defaults** and **device-side** tool execution.
 
-For remote access, users typically pair the server with Tailscale or similar. An optional **Relay** mode exists for pairing flows. See [HTTP_API.md](HTTP_API.md).
+For remote access, users typically pair the server with Tailscale or similar. An optional **Relay** mode (enterprise) exists for pairing flows. See [HTTP_API.md](HTTP_API.md) and [UPGRADING_TO_ENTERPRISE.md](UPGRADING_TO_ENTERPRISE.md).

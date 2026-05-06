@@ -4,13 +4,28 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sys
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from mirai.core.api.routes import stt_transcribe_endpoint
+from mirai.core.api.routers.stt import stt_transcribe_endpoint
 from mirai.core.api.schemas import TranscribeRequest
 from mirai.core.plugins import LOCAL_IDENTITY
 from mirai.core.stt import SttNotConfiguredError, TranscriptionResult, ensure_whisper_weights_cached
+
+
+def _install_fake_whisper_modules(monkeypatch, *, snapshot_download, whisper_model) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "huggingface_hub",
+        SimpleNamespace(get_token=lambda: None, snapshot_download=snapshot_download),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "faster_whisper",
+        SimpleNamespace(WhisperModel=whisper_model),
+    )
 
 
 def test_stt_transcribe_endpoint_uses_provider(monkeypatch):
@@ -67,9 +82,12 @@ def test_ensure_whisper_weights_cached_triggers_model_download(monkeypatch, tmp_
         def __init__(self, model_id: str, **kwargs: object) -> None:
             calls.append((model_id, kwargs))
 
+    _install_fake_whisper_modules(
+        monkeypatch,
+        snapshot_download=_fake_snapshot_download,
+        whisper_model=_FakeWhisperModel,
+    )
     monkeypatch.setattr("mirai.core.stt.whisper_provider._whisper_loads_from_disk", lambda **kwargs: False)
-    monkeypatch.setattr("huggingface_hub.snapshot_download", _fake_snapshot_download)
-    monkeypatch.setattr("faster_whisper.WhisperModel", _FakeWhisperModel)
     ensure_whisper_weights_cached(model=model, model_dir=str(tmp_path))
     assert len(snapshot_calls) == 1
     assert snapshot_calls[0][0][0] == repo_id
@@ -96,8 +114,11 @@ def test_ensure_whisper_weights_cached_skips_when_local(monkeypatch, tmp_path) -
         def __init__(self, model_id: str, **kwargs: object) -> None:
             model_calls.append((model_id, kwargs))
 
-    monkeypatch.setattr("huggingface_hub.snapshot_download", _fake_snapshot_download)
-    monkeypatch.setattr("faster_whisper.WhisperModel", _FakeWhisperModel)
+    _install_fake_whisper_modules(
+        monkeypatch,
+        snapshot_download=_fake_snapshot_download,
+        whisper_model=_FakeWhisperModel,
+    )
     monkeypatch.setattr("mirai.core.stt.whisper_provider._whisper_loads_from_disk", lambda **kwargs: True)
 
     ensure_whisper_weights_cached(model="base", model_dir=str(tmp_path))

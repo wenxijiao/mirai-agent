@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 
-import mirai.core.api.routes as api
+import mirai.core.api.app_factory as api
 import pytest
 from fastapi.testclient import TestClient
 from mirai.core.config.model import ModelConfig
@@ -23,7 +23,7 @@ def _line_tests_stub_chat_model_config(monkeypatch):
     def _ensure(*, interactive: bool = False) -> ModelConfig:
         return ModelConfig(chat_model="test-dummy-model")
 
-    monkeypatch.setattr("mirai.core.api.routes.ensure_chat_model_configured", _ensure)
+    monkeypatch.setattr("mirai.core.api.app_factory.ensure_chat_model_configured", _ensure)
 
 
 def _sign(body: bytes, secret: str) -> str:

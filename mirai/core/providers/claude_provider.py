@@ -98,7 +98,8 @@ class ClaudeProvider(BaseLLMProvider):
             import anthropic
         except ImportError as exc:
             raise ImportError(
-                "The 'anthropic' package is required for the Claude provider. Install it with: pip install anthropic"
+                "The 'anthropic' package is required for the Claude provider. "
+                "Install it with: pip install 'mirai-agent[claude]'"
             ) from exc
 
         resolved_key = api_key or os.getenv("ANTHROPIC_API_KEY") or ""

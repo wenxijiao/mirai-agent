@@ -7,7 +7,7 @@ from mirai.core.env_load import load_mirai_dotenv
 load_mirai_dotenv()
 
 import uvicorn
-from mirai.core.api.routes import app
+from mirai.core.api.app_factory import app
 
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 

@@ -38,7 +38,9 @@ def test_tool_catalog_reads_runtime_edge_registry(monkeypatch):
 
     class _Scope:
         def filter_edge_tool_schemas(self, identity, registry, disabled):
-            return [entry["schema"] for tools in registry.values() for name, entry in tools.items() if name not in disabled]
+            return [
+                entry["schema"] for tools in registry.values() for name, entry in tools.items() if name not in disabled
+            ]
 
     monkeypatch.setattr("mirai.core.plugins.get_edge_scope", lambda: _Scope())
 

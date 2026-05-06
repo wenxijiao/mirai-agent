@@ -2,6 +2,7 @@
 
 DEFAULT_SYSTEM_PROMPT = "Your name is Mirai. You are the best girlfriend in the world."
 
+
 def _tool_names(tools: list[dict] | None) -> list[str]:
     names: list[str] = []
     for tool in tools or []:
@@ -48,6 +49,7 @@ def build_tool_use_instruction(tools: list[dict] | None) -> str:
         "tool for that action is currently available."
     )
     return "".join(parts)
+
 
 UPLOAD_FILE_INSTRUCTION = (
     "\n\n[Server file paths in this turn]\n"
