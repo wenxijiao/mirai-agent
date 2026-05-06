@@ -22,6 +22,27 @@ if TYPE_CHECKING:
 # Extra nudge when the user message clearly references Mirai upload storage.
 _UPLOAD_PATH_RE = re.compile(r"\.mirai[/\\]+uploads[/\\]", re.IGNORECASE)
 
+# Channel session-id prefixes; used to compute peer sessions for cross-channel
+# context (voice ↔ telegram ↔ chat). Order is intentional: it determines the
+# label fallback when a session_id matches multiple prefixes.
+_CHANNEL_PREFIXES = ("voice_", "tg_", "chat_")
+
+
+def _peer_session_ids(session_id: str) -> list[str]:
+    """Sibling session ids for the same owner across other channels.
+
+    Voice/telegram/chat sessions are named ``<channel>_<owner>``; given one
+    of them, return the other two. Sessions that don't follow this scheme
+    return ``[]`` (unchanged behaviour for legacy ids like ``chat_<uuid>``).
+    """
+    for prefix in _CHANNEL_PREFIXES:
+        if session_id.startswith(prefix):
+            owner = session_id[len(prefix) :]
+            if not owner:
+                return []
+            return [p + owner for p in _CHANNEL_PREFIXES if (p + owner) != session_id]
+    return []
+
 _UPLOAD_ANY_PATH_RE = re.compile(r"(/[^\s\n]+?\.mirai/uploads/[^\s\n]+)", re.IGNORECASE)
 
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".ico"})
@@ -143,7 +164,8 @@ def compose_messages(
     upload_mode: Literal["vision", "no_vision"],
 ) -> list[dict]:
     """Build messages with system extras and optional image inlining (vision vs text-only)."""
-    messages = memory.get_context(query=prompt)
+    peers = _peer_session_ids(memory.session_id)
+    messages = memory.get_context(query=prompt, peer_session_ids=peers)
     if messages and messages[0].get("role") == "system":
         extra_parts: list[str] = []
         if cfg.chat_append_current_time:

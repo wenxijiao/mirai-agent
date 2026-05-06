@@ -336,6 +336,92 @@ def run_server_with_telegram() -> None:
             proc.kill()
 
 
+def run_server_with_voice() -> None:
+    """Start Mirai API with a microphone wake-word loop attached.
+
+    The lifespan checks ``MIRAI_VOICE_ENABLED=1`` to decide whether to spawn
+    the voice task. ``voice_owner_id`` is propagated through the env so the
+    child process names the voice session ``voice_<owner>``.
+    """
+    config = load_model_config()
+    ensure_provider_available(config.chat_provider)
+    if config.embedding_provider != config.chat_provider:
+        try:
+            ensure_provider_available(config.embedding_provider)
+        except RuntimeError as exc:
+            print(f"  Warning: embedding provider not available: {exc}")
+    ensure_chat_model_configured(interactive=True)
+
+    rows = _server_banner_rows(config)
+    owner = (config.voice_owner_id or os.getenv("USER") or "default").strip() or "default"
+    notes = [
+        "Mode: local / LAN (single user)",
+        f"Voice: wake-word loop attached (owner={owner}, wake='{config.voice_wake_word}')",
+    ]
+    if not (config.voice_porcupine_access_key or os.getenv("PV_ACCESS_KEY")):
+        notes.append("WARNING: PV_ACCESS_KEY missing — voice loop will fail to start.")
+    _print_banner("Mirai Server + Voice", rows, notes)
+    _print_lan_codes()
+
+    env = _subprocess_env_ensure_platform_tokens()
+    env["MIRAI_VOICE_ENABLED"] = "1"
+    env["MIRAI_VOICE_OWNER_ID"] = owner
+    subprocess.run([sys.executable, "-m", "mirai.core.api"], env=env)
+
+
+def run_server_with_telegram_and_voice() -> None:
+    """Run server + Telegram bridge + microphone voice loop in the same process tree."""
+    if not _prompt_telegram_bot_token_if_missing():
+        sys.exit(1)
+
+    config = load_model_config()
+    ensure_provider_available(config.chat_provider)
+    if config.embedding_provider != config.chat_provider:
+        try:
+            ensure_provider_available(config.embedding_provider)
+        except RuntimeError as exc:
+            print(f"  Warning: embedding provider not available: {exc}")
+    ensure_chat_model_configured(interactive=True)
+
+    rows = _server_banner_rows(config)
+    owner = (config.voice_owner_id or os.getenv("USER") or "default").strip() or "default"
+    notes = [
+        "Mode: local / LAN (single user)",
+        "Telegram bot: will start after server is ready",
+        f"Voice: wake-word loop attached (owner={owner}, wake='{config.voice_wake_word}')",
+    ]
+    if not (config.voice_porcupine_access_key or os.getenv("PV_ACCESS_KEY")):
+        notes.append("WARNING: PV_ACCESS_KEY missing — voice loop will fail to start.")
+    _print_banner("Mirai Server + Telegram + Voice", rows, notes)
+    _print_lan_codes()
+
+    env = _subprocess_env_ensure_platform_tokens()
+    env["MIRAI_VOICE_ENABLED"] = "1"
+    env["MIRAI_VOICE_OWNER_ID"] = owner
+    proc = subprocess.Popen([sys.executable, "-m", "mirai.core.api"], env=env)
+    local_url = "http://127.0.0.1:8000"
+    try:
+        if not _wait_for_server_health(local_url, timeout=90):
+            print("\n  Mirai server did not become healthy in time.\n")
+            return
+        os.environ["MIRAI_SERVER_URL"] = local_url
+        tg = get_telegram_bot_token()
+        if tg and not (os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip():
+            os.environ["TELEGRAM_BOT_TOKEN"] = tg
+        print("  Telegram bot + voice loop running (Ctrl+C stops everything)\n")
+        from mirai.telegram.bot import run_telegram_bot_sync
+
+        run_telegram_bot_sync()
+    except KeyboardInterrupt:
+        print("\n  Shutting down Mirai.\n")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def run_telegram_standalone() -> None:
     """Run only the Telegram bot; connect to the configured local/LAN Mirai API."""
     if not _prompt_telegram_bot_token_if_missing():

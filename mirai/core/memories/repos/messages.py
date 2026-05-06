@@ -173,6 +173,41 @@ class MessageRepository:
             query = query.limit(limit)
         return query.to_list()
 
+    def recent_messages_in_sessions(
+        self,
+        session_ids: list[str],
+        limit: int,
+    ) -> list[dict]:
+        """Return the most recent ``limit`` messages drawn from any of ``session_ids``.
+
+        Used by cross-channel context: a single owner's voice/telegram/chat sessions
+        each persist independently, but the prompt composer wants to interleave the
+        last few turns regardless of channel.
+        """
+        if not session_ids or limit <= 0:
+            return []
+        if not self.table_exists():
+            return []
+        quoted = ",".join("'" + str(s).replace("'", "''") + "'" for s in session_ids)
+        where = f"session_id IN ({quoted})"
+        table = self.open_table()
+        try:
+            total = table.count_rows(where)
+        except Exception:
+            # Fallback: filter all rows in Python if count_rows rejects the IN clause.
+            rows = self.query_rows(limit=None)
+            wanted = set(session_ids)
+            filtered = [r for r in rows if r.get("session_id") in wanted]
+            return filtered[-limit:]
+        offset = max(total - limit, 0)
+        return (
+            table.search(query=None, ordering_field_name="timestamp_num")
+            .where(where)
+            .offset(offset)
+            .limit(limit)
+            .to_list()
+        )
+
     def substring_search_rows(
         self,
         query: str,

@@ -8,6 +8,8 @@ route, alias, or compatibility re-export.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import signal
 from contextlib import asynccontextmanager
 
@@ -107,9 +109,45 @@ async def lifespan(app: FastAPI):
     except (NotImplementedError, RuntimeError, ValueError):
         pass
 
+    voice_task: asyncio.Task | None = None
+    voice_stop: asyncio.Event | None = None
+    if (os.environ.get("MIRAI_VOICE_ENABLED") or "").strip() == "1":
+        try:
+            from mirai.voice.dispatch import voice_dispatch
+            from mirai.voice.runtime import _warm_whisper_once, start_voice_loop
+
+            voice_owner = (
+                os.environ.get("MIRAI_VOICE_OWNER_ID")
+                or config.voice_owner_id
+                or os.getenv("USER")
+                or "default"
+            ).strip() or "default"
+            await _warm_whisper_once()
+
+            async def _dispatch(text: str, _owner: str = voice_owner) -> None:
+                await voice_dispatch(text, owner_id=_owner)
+
+            voice_task, voice_stop = await start_voice_loop(
+                owner_id=voice_owner,
+                dispatch=_dispatch,
+                cfg=config,
+            )
+            log_task_exc_on_done(voice_task, "voice_loop")
+            logger.info("Voice loop attached (owner=%s)", voice_owner)
+        except Exception as exc:
+            logger.warning("Voice loop failed to start: %s", exc)
+            voice_task = None
+            voice_stop = None
+
     yield
 
     logger.info("Shutting down server; cleaning up...")
+    if voice_task is not None:
+        if voice_stop is not None:
+            voice_stop.set()
+        voice_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await voice_task
     if _state.RELAY_CLIENT is not None:
         try:
             await _state.RELAY_CLIENT.stop()

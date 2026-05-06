@@ -67,12 +67,14 @@ dev = [
     "pyright>=1.1",
 ]
 # Optional features. Install only what you need:
-#   pip install mirai-agent[ui,stt]              # web UI + voice
+#   pip install mirai-agent[ui,stt]              # web UI + speech-to-text
+#   pip install mirai-agent[stt,voice]           # mic wake-word + voice session
 #   pip install mirai-agent[telegram,line]       # messaging bridges
 #   pip install mirai-agent[openai,gemini]       # extra LLM providers
 #   pip install mirai-agent[all]                 # everything
 ui = ["reflex>=0.9"]
 stt = ["faster-whisper>=1.0", "huggingface-hub>=0.20"]
+voice = ["sounddevice>=0.4.6", "webrtcvad-wheels>=2.0.14", "pvporcupine>=3.0.0"]
 telegram = ["python-telegram-bot>=21.0"]
 files = ["PyPDF2>=3.0", "python-docx>=1.0"]
 openai = ["openai>=1.0"]
@@ -83,6 +85,9 @@ all = [
     "reflex>=0.9",
     "faster-whisper>=1.0",
     "huggingface-hub>=0.20",
+    "sounddevice>=0.4.6",
+    "webrtcvad-wheels>=2.0.14",
+    "pvporcupine>=3.0.0",
     "python-telegram-bot>=21.0",
     "PyPDF2>=3.0",
     "python-docx>=1.0",

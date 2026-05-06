@@ -202,10 +202,22 @@ class Memory:
         except Exception as exc:
             logger.debug("Structured tool observation write skipped: %s", exc)
 
-    def get_context(self, query: str | None = None, max_cross_session: int | None = None):
+    def get_context(
+        self,
+        query: str | None = None,
+        max_cross_session: int | None = None,
+        peer_session_ids: list[str] | None = None,
+    ):
         from mirai.core.memories.context import ContextBuilder
 
-        return ContextBuilder(self).build(query=query, max_cross_session=max_cross_session)
+        return ContextBuilder(self).build(
+            query=query,
+            max_cross_session=max_cross_session,
+            peer_session_ids=peer_session_ids,
+        )
+
+    def recent_messages_in_sessions(self, session_ids: list[str], limit: int) -> list[dict]:
+        return self.messages.recent_messages_in_sessions(session_ids, limit)
 
     def get_recent_messages(self):
         context = self.get_context()

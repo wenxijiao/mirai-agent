@@ -35,12 +35,22 @@ class ServerCommand(Command):
         return bool(args.server)
 
     def run(self, args):
-        from mirai.cli import run_server, run_server_with_line, run_server_with_telegram
+        from mirai.cli import (
+            run_server,
+            run_server_with_line,
+            run_server_with_telegram,
+            run_server_with_telegram_and_voice,
+            run_server_with_voice,
+        )
 
-        if args.telegram:
+        if args.telegram and getattr(args, "voice", False):
+            run_server_with_telegram_and_voice()
+        elif args.telegram:
             run_server_with_telegram()
         elif args.line:
             run_server_with_line()
+        elif getattr(args, "voice", False):
+            run_server_with_voice()
         else:
             run_server()
 
@@ -86,6 +96,33 @@ class LineStandaloneCommand(Command):
         from mirai.cli import run_line_standalone
 
         run_line_standalone()
+
+
+class VoiceModifierCommand(Command):
+    """``--voice`` modifier: attach a microphone wake-word loop to ``--server``.
+
+    Like ``--telegram``, this flag lives outside the mutex group and only acts
+    as a modifier of ``--server``. There is no standalone mode in v1, so
+    :meth:`matches` always returns False.
+    """
+
+    name = "voice"
+
+    def register(self, parser, mutex_group):
+        parser.add_argument(
+            "--voice",
+            action="store_true",
+            help=(
+                "With --server: open a microphone wake-word session (say 'hi mirai'). "
+                "Requires pip install mirai-agent[voice,stt] and a Picovoice access key."
+            ),
+        )
+
+    def matches(self, args):
+        return False
+
+    def run(self, args):  # pragma: no cover - modifier-only
+        return None
 
 
 # ── lifecycle / setup commands ─────────────────────────────────────────────
@@ -303,6 +340,17 @@ def validate_cross_command_flags(args: argparse.Namespace) -> str | None:
                 "Cannot combine --telegram/--line with --ui/--chat/--edge/--demo/"
                 "--setup/--config/--cleanup/--tool-routing."
             )
+
+    if getattr(args, "voice", False):
+        if any(getattr(args, flag, False) for flag in _NON_SERVER_BASE_FLAGS):
+            return (
+                "Cannot combine --voice with --ui/--chat/--edge/--demo/"
+                "--setup/--config/--cleanup/--tool-routing."
+            )
+        if getattr(args, "line", False):
+            return "Cannot combine --voice with --line."
+        if not getattr(args, "server", False):
+            return "--voice is a modifier; it must be combined with --server."
     return None
 
 
@@ -331,6 +379,7 @@ def build_default_registry() -> CommandRegistry:
     # standalone commands that double as modifier flags
     registry.add(TelegramStandaloneCommand())
     registry.add(LineStandaloneCommand())
+    registry.add(VoiceModifierCommand())
     return registry
 
 
@@ -347,6 +396,7 @@ __all__ = [
     "TelegramStandaloneCommand",
     "ToolRoutingCommand",
     "UICommand",
+    "VoiceModifierCommand",
     "build_default_registry",
     "validate_cross_command_flags",
 ]

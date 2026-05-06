@@ -85,6 +85,17 @@ class ModelConfig(BaseModel):
     stt_model: str | None = None
     stt_model_dir: str | None = None
     stt_language: str = "auto"
+    # Voice session (mic capture + wake word). Only consulted when `mirai --server --voice` is passed;
+    # the modifier sets MIRAI_VOICE_ENABLED=1 which the API lifespan watches.
+    voice_wake_word: str = "hi mirai"
+    voice_porcupine_access_key: str | None = None
+    voice_porcupine_keyword_path: str | None = None
+    voice_porcupine_sensitivity: float = Field(default=0.5, ge=0.0, le=1.0)
+    voice_input_device: int | None = None
+    voice_vad_aggressiveness: int = Field(default=2, ge=0, le=3)
+    voice_silence_ms: int = Field(default=800, ge=100, le=10000)
+    voice_max_utterance_ms: int = Field(default=15000, ge=1000, le=60000)
+    voice_owner_id: str | None = None
 
     @field_validator("proactive_mode")
     @classmethod
