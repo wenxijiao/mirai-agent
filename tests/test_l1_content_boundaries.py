@@ -29,6 +29,9 @@ CONCRETE_FORBIDDEN_RE = re.compile(
             r"\bmemori\b",
             r"\btemi\b",
             r"\bcreate_temi\b",
+            r"\bmugi\b",
+            r"\bcreate_seed\b",
+            r"\bcheck_in_seed\b",
         ]
     ),
     re.IGNORECASE,
