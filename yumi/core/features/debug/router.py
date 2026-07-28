@@ -17,7 +17,7 @@ from yumi.core.platform.plugins import has_admin_scope
 from yumi.core.platform.runtime.accessors import ACTIVE_CONNECTIONS, EDGE_TOOLS_REGISTRY
 from yumi.core.platform.runtime.edge_naming import parse_edge_connection_key, split_edge_prefixed_tool
 from yumi.core.platform.tools.routing import list_tool_routing_traces
-from yumi.core.platform.tools.trace import list_traces
+from yumi.core.platform.tools.trace import list_traces, redact_traces_for_viewer
 
 router = APIRouter()
 
@@ -153,7 +153,10 @@ async def debug_observability_endpoint(
         raise HTTPException(status_code=403, detail="Admin scope required for debug observability.")
     edges = _edges_snapshot()
     routing_traces = _routing_traces(limit)
-    tool_calls = list_traces(limit=limit)
+    # This page answers "is the system healthy", which the metadata answers on
+    # its own. Other people's tool arguments come back as presence flags; their
+    # content lives behind the admin console's audited endpoint.
+    tool_calls = redact_traces_for_viewer(list_traces(limit=limit), getattr(identity, "user_id", ""))
     return {
         "identity": {"user_id": getattr(identity, "user_id", None)},
         "config": _config_snapshot(),

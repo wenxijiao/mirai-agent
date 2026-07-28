@@ -187,6 +187,43 @@ def list_traces(
     return out
 
 
+# Tool arguments and results are the caller's own words — `add_note(plan=
+# "明天记得买牛奶")` is a diary entry, not telemetry. Everything else in a trace
+# (which tool, how long, did it succeed) describes the system, not the person.
+_TRACE_CONTENT_FIELDS = ("arguments", "result_preview")
+
+
+def redact_trace_content(rec: dict[str, Any]) -> dict[str, Any]:
+    """Drop the content fields, keeping flags so the UI can say "there is some"."""
+    out = {k: v for k, v in rec.items() if k not in _TRACE_CONTENT_FIELDS}
+    out["arguments_redacted"] = bool(rec.get("arguments"))
+    out["result_redacted"] = bool(rec.get("result_preview"))
+    return out
+
+
+def redact_traces_for_viewer(traces: list[dict[str, Any]], viewer_user_id: str) -> list[dict[str, Any]]:
+    """Full traces for the viewer's own sessions, metadata only for everyone else's.
+
+    Diagnostic endpoints answer "is the system healthy" — a question the
+    metadata alone answers. Reading someone else's conversation is a different
+    act, and it belongs on the admin console's audited path.
+
+    Single-user deployments are unaffected: the operator *is* the data subject
+    there, so every session resolves to their own id and nothing is stripped.
+    """
+    from yumi.core.platform.plugins import get_session_scope
+
+    scope = get_session_scope()
+    out: list[dict[str, Any]] = []
+    for rec in traces:
+        try:
+            owner = scope.owner_user_from_session_id(str(rec.get("session_id") or ""))
+        except Exception:
+            owner = ""  # unresolvable ownership is treated as someone else's
+        out.append(dict(rec) if owner and owner == viewer_user_id else redact_trace_content(rec))
+    return out
+
+
 def snapshot_traces(*, session_id: str | None = None) -> list[dict[str, Any]]:
     """All buffered traces (newest-first), unclamped — for in-process aggregation/export.
 
@@ -201,9 +238,15 @@ def snapshot_traces(*, session_id: str | None = None) -> list[dict[str, Any]]:
     return [dict(r) for r in items]
 
 
-def export_traces_json_lines(session_id: str | None = None) -> str:
-    """All matching traces as NDJSON (oldest first in file order for export readability)."""
+def export_traces_json_lines(session_id: str | None = None, *, viewer_user_id: str | None = None) -> str:
+    """All matching traces as NDJSON (oldest first in file order for export readability).
+
+    Pass ``viewer_user_id`` to apply :func:`redact_traces_for_viewer`; omit it
+    for in-process consumers that are not shipping the bytes to a person.
+    """
     rows = snapshot_traces(session_id=session_id)
+    if viewer_user_id is not None:
+        rows = redact_traces_for_viewer(rows, viewer_user_id)
     return "\n".join(json.dumps(r, ensure_ascii=False, default=str) for r in reversed(rows)) + "\n"
 
 

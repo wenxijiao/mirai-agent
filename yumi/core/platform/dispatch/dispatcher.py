@@ -318,6 +318,11 @@ class ToolDispatcher:
         result = await self._run_one(inv)
         dt_ms = int((time.perf_counter() - t0) * 1000)
         display = inv.original_tool_name if inv.kind == "edge" and inv.original_tool_name else inv.func_name
+        # Same numbers as the trace below, but kept for the durable transcript:
+        # traces live in a 2000-entry ring buffer, so a call from last week has
+        # no timing left by the time anyone asks what happened.
+        if inv.tool_call_id:
+            ctx.tool_metrics[inv.tool_call_id] = {"duration_ms": dt_ms, "status": result.status}
         record_tool_trace(
             session_id=ctx.session_id,
             tool_name=inv.func_name,

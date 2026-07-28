@@ -1064,6 +1064,12 @@ def _event_fields_from_message(message: dict[str, Any]) -> dict[str, Any]:
             payload = _json_loads(raw_content[len(YUMI_V1_TOOL_RESULT) :], {}) or {}
             if isinstance(payload, dict):
                 tool_name = str(payload.get("name") or "tool")
+        # How long the call took and whether it failed. Attached by the chat
+        # service when it copies messages for persistence, never by the
+        # provider path — tool messages go to the model verbatim.
+        metrics = message.get("yumi_tool_metrics")
+        if isinstance(metrics, dict):
+            metadata.update({k: metrics[k] for k in ("duration_ms", "status") if k in metrics})
     elif role == "system":
         event_type = "system_note"
 

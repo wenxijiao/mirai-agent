@@ -8,7 +8,7 @@ from yumi.core.platform.http.dependencies import CurrentIdentity
 from yumi.core.platform.plugins import get_session_scope, has_admin_scope
 from yumi.core.platform.runtime.accessors import ACTIVE_CONNECTIONS, DISABLED_TOOLS, EDGE_TOOLS_REGISTRY
 from yumi.core.platform.tools.tool import TOOL_REGISTRY
-from yumi.core.platform.tools.trace import export_traces_json_lines, list_traces
+from yumi.core.platform.tools.trace import export_traces_json_lines, list_traces, redact_traces_for_viewer
 
 router = APIRouter()
 
@@ -48,7 +48,11 @@ async def monitor_traces_endpoint(
     _require_admin(identity)
     scope = get_session_scope()
     sid = scope.qualify_session_http(identity, session_id) if session_id else None
-    return {"traces": list_traces(session_id=sid, limit=limit)}
+    traces = list_traces(session_id=sid, limit=limit)
+    # Admin scope is not consent: other people's tool arguments come back as
+    # presence flags. Their content is reachable through the admin console,
+    # which records who read it.
+    return {"traces": redact_traces_for_viewer(traces, getattr(identity, "user_id", ""))}
 
 
 @router.get("/monitor/traces/export")
@@ -56,7 +60,10 @@ async def monitor_traces_export_endpoint(identity: CurrentIdentity, session_id: 
     _require_admin(identity)
     scope = get_session_scope()
     sid = scope.qualify_session_http(identity, session_id) if session_id else None
-    body = export_traces_json_lines(session_id=sid)
+    # A bulk download is the worst place to leak other people's conversations:
+    # it leaves the system entirely, in one click, with no record of what it
+    # held. Same ownership rule as /monitor/traces.
+    body = export_traces_json_lines(session_id=sid, viewer_user_id=getattr(identity, "user_id", ""))
     return StreamingResponse(
         iter([body]),
         media_type="application/x-ndjson; charset=utf-8",

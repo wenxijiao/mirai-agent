@@ -94,11 +94,27 @@ def _assistant_tool_spans(messages: list[dict]) -> list[tuple[int, int]]:
     return spans
 
 
-def _persist_tool_ephemeral_spans(messages: list[dict], session_id: str, bot) -> None:
+def _with_metrics(message: dict, tool_metrics: dict | None) -> dict:
+    """Copy *message*, attaching its execution metrics when it is a tool result."""
+    copy = dict(message)
+    if tool_metrics and copy.get("role") == "tool":
+        metrics = tool_metrics.get(str(copy.get("tool_call_id") or ""))
+        if metrics:
+            copy["yumi_tool_metrics"] = dict(metrics)
+    return copy
+
+
+def _persist_tool_ephemeral_spans(messages: list[dict], session_id: str, bot, tool_metrics: dict | None = None) -> None:
+    """Move completed assistant+tool spans out of the turn and into the transcript.
+
+    ``tool_metrics`` (keyed by tool_call_id) is folded into the persisted copy
+    only. The originals stay clean because they are still being sent to the
+    provider, which forwards tool messages field-for-field.
+    """
     spans = _assistant_tool_spans(messages)
     if not spans:
         return
-    turns = [[dict(messages[k]) for k in range(i, j)] for i, j in spans]
+    turns = [[_with_metrics(messages[k], tool_metrics) for k in range(i, j)] for i, j in spans]
     memory = bot.session_memory(session_id)
     for turn in turns:
         memory.persist_openai_messages(turn)
@@ -240,7 +256,7 @@ class ChatTurnService:
 
             async for event in self._run_loops(ctx, sink, active_bot, usage, normalizer, gate, dispatcher):
                 yield event
-            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot)
+            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
         except Exception as exc:
             diag = sink.write_diagnostic("chat_pipeline_failed", error=exc, extra={"reason": "exception"})
             logger.exception("Chat pipeline failed session_id=%s diagnostic=%s", ctx.session_id, diag)
@@ -355,7 +371,7 @@ class ChatTurnService:
                 yield sink.emit(ev)
 
             if not invocations:
-                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot)
+                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
                 current_prompt = None
                 continue
 
@@ -367,7 +383,7 @@ class ChatTurnService:
                     approved.append(inv)
 
             if not approved:
-                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot)
+                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
                 current_prompt = None
                 continue
 
@@ -451,7 +467,7 @@ class ChatTurnService:
                     except (json.JSONDecodeError, TypeError, AttributeError):
                         pass
 
-            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot)
+            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
             current_prompt = None  # subsequent iterations use ephemeral_messages only
 
     # ---- helper paths -------------------------------------------------------

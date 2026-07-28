@@ -32,6 +32,13 @@ class TurnContext:
     tool_loop_events: list[dict] = field(default_factory=list)
     last_tools: list | None = None
 
+    # How long each tool took and whether it succeeded, keyed by tool_call_id.
+    # Kept beside the messages rather than on them: tool messages are forwarded
+    # to the provider verbatim (see ``openai_provider._ensure_tool_call_ids``),
+    # and an unknown field there is a 400 from a strict endpoint. The transcript
+    # writer folds these in when it copies messages for persistence.
+    tool_metrics: dict[str, dict] = field(default_factory=dict)
+
     # Tracks consecutive normalization failures so we can bail out cleanly.
     tool_format_retries: int = 0
 
