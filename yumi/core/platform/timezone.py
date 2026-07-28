@@ -37,6 +37,11 @@ def format_user_facing_time(now_utc: datetime, configured_iana_tz: str | None) -
     When ``configured_iana_tz`` is set (e.g. ``Pacific/Auckland``), use that zone.
     When unset, use the **host** system local zone (``now_utc.astimezone()`` without args),
     matching typical ``datetime.now()`` behaviour on a correctly configured desktop.
+
+    The UTC offset is part of the output on purpose. Tools that take an ISO-8601
+    argument (edge reminders, calendar entries) make the model write an offset;
+    without one here it has to guess, and a wrong guess silently shifts the time
+    by hours. Example: ``2026-05-03 16:46:00 Sunday NZST (UTC+12:00)``.
     """
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=timezone.utc)
@@ -47,7 +52,11 @@ def format_user_facing_time(now_utc: datetime, configured_iana_tz: str | None) -
         local = now_utc.astimezone(proactive_tzinfo(label))
     else:
         local = now_utc.astimezone()
-    return local.strftime("%Y-%m-%d %H:%M:%S %A")
+    wall_clock = local.strftime("%Y-%m-%d %H:%M:%S %A")
+    zone_name = local.strftime("%Z").strip()
+    raw_offset = local.strftime("%z")  # e.g. "+1200"; empty only for naive datetimes
+    offset = f"UTC{raw_offset[:3]}:{raw_offset[3:]}" if len(raw_offset) >= 5 else "UTC"
+    return f"{wall_clock} {zone_name} ({offset})".replace("  ", " ")
 
 
 def _parse_clock(value: str) -> time | None:
