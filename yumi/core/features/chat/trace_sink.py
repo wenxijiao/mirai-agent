@@ -1,12 +1,4 @@
-"""Single sink for chat-turn observability.
-
-Centralises three sources of side-effect that used to be scattered across
-``_generate_chat_events_impl``:
-
-* per-event NDJSON tracing (``chat_debug_trace.append_*``),
-* turn-level diagnostics on failure (``write_chat_diagnostic`` /
-  ``write_chat_loop_diagnostic``),
-* fan-out of provider usage records.
+"""Single sink for durable chat-turn observability and failure diagnostics.
 
 Callers ``sink.emit(event)`` with a typed :class:`~yumi.core.platform.http.events.ChatEvent`;
 the sink records the event then returns it so the orchestrator can ``yield``
@@ -18,9 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from yumi.core.features.chat import debug_trace as chat_debug_trace
+from yumi.core.features.prompts.catalog import prompt_catalog_metadata
 from yumi.core.platform.dispatch.context import TurnContext
 from yumi.core.platform.http.events import ChatEvent
+from yumi.core.platform.observability import turn_inspector
 from yumi.core.platform.providers.diagnostics import write_chat_diagnostic, write_chat_loop_diagnostic
 
 
@@ -39,22 +32,26 @@ class ChatTraceSink:
         Returns the event unchanged so the orchestrator can ``yield sink.emit(...)``
         in one expression and downstream code keeps the typed model.
         """
-        if chat_debug_trace.is_tracing(self.ctx.session_id):
-            chat_debug_trace.append_stream_event(self.ctx.session_id, event.model_dump())
+        payload = event.model_dump()
+        turn_inspector.record_stream_event(self.ctx.session_id, payload)
         return event
 
     def record_provider_usage(self, chunk: dict) -> None:
-        if chat_debug_trace.is_tracing(self.ctx.session_id):
-            chat_debug_trace.append_record(self.ctx.session_id, {"kind": "provider_usage", "usage": dict(chunk)})
+        turn_inspector.record_usage(self.ctx.session_id, chunk)
+
+    def record_provider_finish(self, chunk: dict) -> None:
+        turn_inspector.record_finish(self.ctx.session_id, chunk)
 
     def record_turn_begin(self) -> None:
-        if chat_debug_trace.is_tracing(self.ctx.session_id):
-            chat_debug_trace.append_turn_begin(
-                self.ctx.session_id,
-                prompt=self.ctx.prompt,
-                think=self.ctx.think,
-                timer_callback=self.ctx.timer_callback,
-            )
+        turn_inspector.begin_turn(
+            turn_id=self.ctx.turn_id,
+            session_id=self.ctx.session_id,
+            prompt=self.ctx.prompt,
+            think=self.ctx.think,
+            timer_callback=self.ctx.timer_callback,
+            prompt_metadata=prompt_catalog_metadata(),
+            owner_user_id=self.ctx.owner_uid or "",
+        )
 
     def record_turn_end(
         self,
@@ -63,20 +60,49 @@ class ChatTraceSink:
         total_completion_tokens: int,
         usage_model: str,
     ) -> None:
-        if not chat_debug_trace.is_tracing(self.ctx.session_id):
+        detail = turn_inspector.end_turn(
+            self.ctx.session_id,
+            total_prompt_tokens=total_prompt_tokens,
+            total_completion_tokens=total_completion_tokens,
+            usage_model=usage_model,
+            tool_loop_events=self.ctx.tool_loop_events,
+        )
+        if detail is None or self.bot is None:
             return
         try:
-            chat_debug_trace.append_turn_end(
-                self.ctx.session_id,
-                model=self.bot.model_name if self.bot is not None else None,
-                total_prompt_tokens=total_prompt_tokens,
-                total_completion_tokens=total_completion_tokens,
-                usage_model=usage_model,
+            self.bot.session_memory(self.ctx.session_id).sqlite.upsert_turn_trace(
+                detail,
+                owner_user_id=self.ctx.owner_uid or "",
             )
         except Exception:
             from yumi.logging_config import get_logger
 
-            get_logger(__name__).debug("chat trace turn_end skipped", exc_info=True)
+            get_logger(__name__).debug("durable turn trace persistence skipped", exc_info=True)
+
+    def record_routing(self) -> None:
+        turn_inspector.record_routing(self.ctx.session_id, self.ctx.routing_summary)
+
+    def record_tool_calls(self, tool_calls: list[dict]) -> None:
+        turn_inspector.record_tool_calls(
+            self.ctx.session_id,
+            loop=self.ctx.loop_count,
+            tool_calls=tool_calls,
+        )
+
+    def record_tool_result(self, inv: Any, result: Any) -> None:
+        metrics = self.ctx.tool_metrics.get(str(getattr(inv, "tool_call_id", "") or ""), {})
+        turn_inspector.record_tool_result(
+            self.ctx.session_id,
+            loop=self.ctx.loop_count,
+            call_id=str(getattr(inv, "tool_call_id", "") or ""),
+            tool=str(getattr(inv, "tool_message_name", "") or getattr(inv, "func_name", "")),
+            resolved_tool=str(getattr(result, "func_name", "") or getattr(inv, "func_name", "")),
+            kind=str(getattr(inv, "kind", "unknown")),
+            edge=getattr(inv, "target_edge", None),
+            status=str(getattr(result, "status", "unknown")),
+            duration_ms=metrics.get("duration_ms"),
+            result_preview=getattr(result, "result", ""),
+        )
 
     # ---- diagnostics on failure ---------------------------------------------
 

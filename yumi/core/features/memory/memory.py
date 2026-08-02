@@ -55,6 +55,7 @@ from yumi.core.features.memory.repos import (
     ToolObservationRepository,
 )
 from yumi.core.features.memory.tool_replay import persist_openai_messages as _tool_replay_persist
+from yumi.core.features.prompts.catalog import RELATED_MEMORY_HEADER, RELATED_MEMORY_ITEM_TEMPLATE
 from yumi.core.features.prompts.store import get_effective_system_prompt
 from yumi.core.platform.storage.sqlite_store import SQLiteStore, db_path_for_memory_storage
 from yumi.logging_config import get_logger
@@ -332,7 +333,14 @@ class Memory:
 
     # ── public API: messages ───────────────────────────────────────────────
 
-    def add_message(self, role: str, content: str, thought: str | None = None) -> str:
+    def add_message(
+        self,
+        role: str,
+        content: str,
+        thought: str | None = None,
+        *,
+        turn_id: str = "",
+    ) -> str:
         # Route through ``create_message`` (not the repo's ``add``) so the
         # ``MemoryWriter`` structured-extraction hook fires for every write.
         timestamp = self.backend.format_timestamp()
@@ -342,6 +350,7 @@ class Memory:
             role=role,
             content=content,
             thought=thought,
+            turn_id=turn_id,
             timestamp=timestamp,
             timestamp_num=timestamp_num,
         )["id"]
@@ -450,6 +459,7 @@ class Memory:
         timestamp_num: int | None = None,
         message_id: str | None = None,
         thought: str | None = None,
+        turn_id: str = "",
     ) -> dict:
         # SQLite is the source of truth and must be written first. LanceDB is a
         # derived index (used only for fast semantic lookup) and is rebuilt from
@@ -478,6 +488,7 @@ class Memory:
             "role": normalized_role,
             "content": normalized_content,
             "thought": thought_val,
+            "turn_id": turn_id or "",
             "timestamp": timestamp or self.backend.format_timestamp(),
             "timestamp_num": (timestamp_num if timestamp_num is not None else self.backend.current_timestamp_num()),
         }
@@ -533,6 +544,7 @@ class Memory:
             timestamp_num=self.backend.current_timestamp_num(),
             message_id=existing["id"],
             thought=existing.get("thought") or None,
+            turn_id=str(existing.get("turn_id") or ""),
         )
 
     def search_messages(
@@ -560,7 +572,7 @@ class Memory:
             return None
         related = self.search_messages(query=query, session_id=None, limit=limit)
         seen: set[tuple] = set()
-        lines = ["Relevant memory from previous chats:"]
+        lines = [RELATED_MEMORY_HEADER]
         for item in related:
             if exclude_session_id and item["session_id"] == exclude_session_id:
                 continue
@@ -569,7 +581,14 @@ class Memory:
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            lines.append(f"- [{item['session_id']}] ({item['role']}, {item['timestamp']}) {normalized_content[:240]}")
+            lines.append(
+                RELATED_MEMORY_ITEM_TEMPLATE.format(
+                    session_id=item["session_id"],
+                    role=item["role"],
+                    timestamp=item["timestamp"],
+                    content=normalized_content[:240],
+                )
+            )
         if len(lines) == 1:
             return None
         return {"role": "system", "content": "\n".join(lines)}

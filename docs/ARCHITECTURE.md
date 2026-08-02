@@ -69,7 +69,7 @@ yumi/core/
 
 To understand or delete one capability, look in one folder: e.g. everything for
 chat lives in `features/chat/` (`router.py` → `pipeline.py` → `service.py`,
-plus `context.py`, `debug_trace.py`, `trace_sink.py`).
+plus `context.py` and `trace_sink.py`).
 
 > **Note on legacy import paths.** Modules were relocated here from a flatter
 > `yumi/core/` layout. The old paths were **removed** — there are no
@@ -98,7 +98,7 @@ changes; see `yumi/ui/frontend/README.md`.
 
   | Router | Resource |
   |---|---|
-  | `features/chat/router.py` | `POST /chat` (NDJSON streaming), `POST /clear`, `PUT/GET /config/chat-debug` |
+  | `features/chat/router.py` | `POST /chat` (NDJSON streaming), `POST /clear`, `GET /chat/turns[/{turn_id}]` |
   | `features/config/router.py` | `GET/PUT /config/{model,system-prompt,session-prompt,ui}` |
   | `features/edge/router.py` | `WS /ws/edge` |
   | `features/health/router.py` | `GET /health` |

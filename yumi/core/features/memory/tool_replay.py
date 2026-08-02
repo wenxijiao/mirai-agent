@@ -36,9 +36,17 @@ def persist_openai_messages(memory: Any, messages: list[dict[str, Any]]) -> None
             if reasoning:
                 data["reasoning_content"] = reasoning
             payload = json.dumps(data, ensure_ascii=False)
-            memory.add_message("assistant", YUMI_V1_TOOL_CALLS + payload)
+            memory.add_message(
+                "assistant",
+                YUMI_V1_TOOL_CALLS + payload,
+                turn_id=str(m.get("turn_id") or ""),
+            )
         elif role == "tool":
             name = (m.get("name") or "tool").strip() or "tool"
             body = str(m.get("content", ""))
             payload = json.dumps({"name": name, "content": body}, ensure_ascii=False)
-            memory.add_message("tool", YUMI_V1_TOOL_RESULT + payload)
+            memory.add_message(
+                "tool",
+                YUMI_V1_TOOL_RESULT + payload,
+                turn_id=str(m.get("turn_id") or ""),
+            )

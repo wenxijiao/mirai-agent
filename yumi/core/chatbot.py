@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
-from yumi.core.features.chat import debug_trace as chat_debug_trace
 from yumi.core.features.config import load_model_config
 from yumi.core.features.config.model import ModelConfig
 from yumi.core.features.config.paths import CONFIG_DIR, ensure_config_dir
 from yumi.core.features.memory.memory import Memory
 from yumi.core.features.prompts.composer import compose_messages, messages_have_multimodal_images
+from yumi.core.platform.observability import turn_inspector
 from yumi.core.platform.plugins import get_session_scope
 from yumi.core.platform.providers.base import BaseLLMProvider
 from yumi.core.platform.providers.diagnostics import provider_name, write_provider_failure_diagnostic
@@ -72,6 +72,7 @@ class YumiBot:
         tools: list | None = None,
         ephemeral_messages: list | None = None,
         think: bool | None = None,
+        turn_id: str = "",
     ):
         """Core streaming chat flow with function-calling support."""
         memory = self._get_memory(session_id)
@@ -87,15 +88,15 @@ class YumiBot:
             upload_mode="vision",
         )
         if prompt:
-            user_message_id = memory.add_message("user", prompt)
+            user_message_id = memory.add_message("user", prompt, turn_id=turn_id)
 
-        if chat_debug_trace.is_tracing(session_id):
-            chat_debug_trace.append_llm_provider_request(
-                session_id,
-                model=self.model_name,
-                messages=messages,
-                tools=tools,
-            )
+        turn_inspector.record_llm_request(
+            session_id,
+            provider=provider_name(self.provider),
+            model=self.model_name,
+            messages=messages,
+            tools=tools,
+        )
 
         use_think = think if think is not None else self.think
         full_response = ""
@@ -125,6 +126,12 @@ class YumiBot:
                 think=use_think,
             ):
                 if chunk.get("type") == "usage":
+                    yield chunk
+                    continue
+                if chunk.get("type") == "finish":
+                    # Internal provider terminal metadata. The chat service
+                    # consumes it to distinguish a clean stop from truncation
+                    # or blocking; it is not emitted directly to HTTP clients.
                     yield chunk
                     continue
                 if chunk["type"] == "tool_call":
@@ -185,14 +192,14 @@ class YumiBot:
                     upload_mode="no_vision",
                     exclude_message_ids={user_message_id} if user_message_id else None,
                 )
-                if chat_debug_trace.is_tracing(session_id):
-                    chat_debug_trace.append_llm_provider_request(
-                        session_id,
-                        model=self.model_name,
-                        messages=messages_fb,
-                        tools=tools,
-                        note="text_only_fallback_after_vision_rejection",
-                    )
+                turn_inspector.record_llm_request(
+                    session_id,
+                    provider=provider_name(self.provider),
+                    model=self.model_name,
+                    messages=messages_fb,
+                    tools=tools,
+                    note="text_only_fallback_after_vision_rejection",
+                )
                 try:
                     async for chunk in _consume_stream(messages_fb):
                         yield chunk
@@ -212,6 +219,7 @@ class YumiBot:
                 "assistant",
                 full_response,
                 thought=full_thought.strip() if use_think and full_thought.strip() else None,
+                turn_id=turn_id,
             )
 
     def clear_memory(self, session_id: str = "default"):

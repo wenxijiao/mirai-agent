@@ -98,6 +98,50 @@ def test_happy_path_text_only_stream(runtime, install_fakes):
     assert bot.call_count == 1
 
 
+def test_normal_provider_finish_is_internal(runtime, install_fakes):
+    bot = _FakeBot(
+        scripted_chunks=[
+            [
+                {"type": "text", "content": "hello"},
+                {"type": "finish", "reason": "stop", "provider_reason": "end_turn"},
+            ]
+        ]
+    )
+    install_fakes(bot)
+
+    events = asyncio.run(_drain(ChatTurnService(runtime).stream_chat_turn("hi", "s_finish_stop")))
+
+    assert [event.type for event in events] == ["text"]
+
+
+@pytest.mark.parametrize(
+    ("reason", "code"),
+    [
+        ("length", "YUMI_LLM_RESPONSE_TRUNCATED"),
+        ("blocked", "YUMI_LLM_RESPONSE_BLOCKED"),
+        ("unknown", "YUMI_LLM_FINISH_UNKNOWN"),
+    ],
+)
+def test_abnormal_provider_finish_emits_error(runtime, install_fakes, monkeypatch, reason, code):
+    bot = _FakeBot(
+        scripted_chunks=[
+            [
+                {"type": "text", "content": "partial"},
+                {"type": "finish", "reason": reason, "provider_reason": "raw_reason"},
+            ]
+        ]
+    )
+    install_fakes(bot)
+    monkeypatch.setattr("yumi.core.features.chat.trace_sink.write_chat_diagnostic", lambda **_kwargs: None)
+
+    events = asyncio.run(_drain(ChatTurnService(runtime).stream_chat_turn("hi", f"s_finish_{reason}")))
+
+    assert any(event.type == "text" and event.content == "partial" for event in events)
+    errors = [event for event in events if event.type == "error"]
+    assert len(errors) == 1
+    assert errors[0].code == code
+
+
 def test_max_tool_loops_emits_error(runtime, install_fakes):
     """Looping ``unknown tool`` calls drives loop_count past MAX_TOOL_LOOPS."""
     chunks_per_iter = [

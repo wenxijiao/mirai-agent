@@ -1,8 +1,8 @@
 """Canonical user-facing copy shared by the chat bridges (Telegram / Discord / LINE).
 
 One help text and one unlinked-guidance string so every channel presents the
-same interface. Power/debug commands (/model, /system, /start_log, /end_log)
-keep working on every bridge but are deliberately not listed for end users.
+same interface. Power commands such as /model and /system keep working on
+every bridge but are deliberately not listed for end users.
 """
 
 

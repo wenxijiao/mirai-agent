@@ -59,7 +59,7 @@ function isReplayArtifact(content: string): boolean {
 }
 
 /** Drop replay rows, de-duplicate by id, collapse back-to-back identical user rows. */
-function normalize(rows: { id: string; role: string; content: string; thought?: string }[]): ChatMessage[] {
+function normalize(rows: { id: string; turn_id?: string; role: string; content: string; thought?: string }[]): ChatMessage[] {
   const seen = new Set<string>()
   const out: ChatMessage[] = []
   for (const m of rows) {
@@ -70,7 +70,7 @@ function normalize(rows: { id: string; role: string; content: string; thought?: 
     if (m.id) seen.add(m.id)
     const prev = out[out.length - 1]
     if (m.role === "user" && prev?.role === "user" && prev.content.trim() === content.trim()) continue
-    out.push({ id: m.id, role: m.role as Role, content, thought: m.thought })
+    out.push({ id: m.id, turn_id: m.turn_id, role: m.role as Role, content, thought: m.thought })
   }
   return out
 }

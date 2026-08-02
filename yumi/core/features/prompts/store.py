@@ -13,7 +13,7 @@ or plugin context. Session-scoped addendum overrides the global addendum
 when both are set; clearing it falls back to the global one.
 """
 
-from yumi.core.features.prompts.defaults import DEFAULT_SYSTEM_PROMPT
+from yumi.core.features.prompts.catalog import DEFAULT_SYSTEM_PROMPT
 
 # Note: ``yumi.core.features.config`` re-exports several of the functions below, so
 # importing it at module top would form a cycle. Functions that need the

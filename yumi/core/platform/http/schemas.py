@@ -116,13 +116,6 @@ class ModelConfigUpdateRequest(BaseModel):
     searxng_base_url: str | None = None
 
 
-class ChatDebugRequest(BaseModel):
-    """Enable or disable NDJSON chat tracing for a session (writes under ~/.yumi/debug/chat_trace/)."""
-
-    session_id: str = "default"
-    enabled: bool
-
-
 class SessionPromptRequest(BaseModel):
     system_prompt: str
 

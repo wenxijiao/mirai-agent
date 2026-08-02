@@ -1,5 +1,7 @@
 import type {
   ChatEvent,
+  DebugTurn,
+  DebugTurnSummary,
   ModelConfig,
   Observability,
   SearchResult,
@@ -90,11 +92,21 @@ export const api = {
 
   // ── messages ──
   listMessages: (sessionId: string, limit = 200) =>
-    request<{ messages: { id: string; role: string; content: string; thought?: string }[] }>(
+    request<{ messages: { id: string; turn_id?: string; role: string; content: string; thought?: string }[] }>(
       "GET",
       `/memory/messages?session_id=${encodeURIComponent(sessionId)}&limit=${limit}`,
     ).then((r) => r.messages || []),
   clearSession: (sessionId: string) => request("POST", `/clear?session_id=${encodeURIComponent(sessionId)}`),
+  chatTurns: (sessionId?: string, limit = 50) => {
+    const q = new URLSearchParams({ limit: String(limit) })
+    if (sessionId) q.set("session_id", sessionId)
+    return request<{ turns: DebugTurnSummary[]; retention: { kind: string; message: string } }>(
+      "GET",
+      `/chat/turns?${q.toString()}`,
+    )
+  },
+  chatTurn: (turnId: string) =>
+    request<{ turn: DebugTurn }>("GET", `/chat/turns/${encodeURIComponent(turnId)}`).then((r) => r.turn),
   searchMemory: (query: string, sessionId?: string, limit = 30) => {
     const q = new URLSearchParams({ query, limit: String(limit) })
     if (sessionId) q.set("session_id", sessionId)
@@ -122,6 +134,16 @@ export const api = {
 
   // ── debug / observability ──
   observability: (limit = 50) => request<Observability>("GET", `/debug/observability?limit=${limit}`),
+  debugTurns: (sessionId?: string, limit = 30) => {
+    const q = new URLSearchParams({ limit: String(limit) })
+    if (sessionId) q.set("session_id", sessionId)
+    return request<{ turns: DebugTurnSummary[]; retention: { kind: string; message: string } }>(
+      "GET",
+      `/debug/turns?${q.toString()}`,
+    )
+  },
+  debugTurn: (turnId: string) =>
+    request<{ turn: DebugTurn }>("GET", `/debug/turns/${encodeURIComponent(turnId)}`).then((r) => r.turn),
 
   // ── timers ──
   timers: () => request<{ timers: Timer[] }>("GET", "/timers").then((r) => r.timers || []),

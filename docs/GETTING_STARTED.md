@@ -94,7 +94,7 @@ The UI includes:
 
 - **Chat**: session management, search, pinning, streaming replies, file upload, and voice (mic input + spoken replies)
 - **Tools**: enable/disable server tools and connected edge devices, with per-tool confirmation gating
-- **Stats**: a dashboard of token usage, tool-call counts, and conversation activity
+- **Debug**: a per-turn inspector for prompt layers, LLM rounds, tool calls, cache usage, finish reasons, and Edge routing health
 - **Settings**: models, API keys, prompts, memory, voice, appearance, and edge-routing config
 - **Schedules**, **Memory search**, a first-run **setup wizard**, and a **⌘K command palette**
 

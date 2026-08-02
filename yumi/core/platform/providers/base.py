@@ -1,6 +1,38 @@
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal
+
+ProviderFinishReason = Literal["stop", "length", "blocked", "unknown"]
+
+
+def provider_reason_text(reason: Any) -> str | None:
+    """Return a stable text form for SDK strings/enums used as stop reasons."""
+    if reason is None:
+        return None
+    name = getattr(reason, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    value = getattr(reason, "value", None)
+    if isinstance(value, str) and value:
+        return value
+    text = str(reason).strip()
+    if not text:
+        return None
+    # Enum stringification commonly produces ``FinishReason.STOP``.
+    return text.rsplit(".", 1)[-1]
+
+
+def provider_finish_chunk(
+    reason: ProviderFinishReason,
+    *,
+    provider_reason: Any = None,
+) -> dict[str, Any]:
+    """Build the provider-independent terminal event consumed by Yumi."""
+    chunk: dict[str, Any] = {"type": "finish", "reason": reason}
+    raw = provider_reason_text(provider_reason)
+    if raw:
+        chunk["provider_reason"] = raw
+    return chunk
 
 
 class BaseLLMProvider:
@@ -32,6 +64,13 @@ class BaseLLMProvider:
 
         The ``tool_calls`` list must use OpenAI-style structure regardless
         of the underlying provider.
+
+        A stream without a tool call ends with a normalized finish chunk::
+
+            {"type": "finish", "reason": "stop"}
+
+        ``reason`` is one of ``stop`` / ``length`` / ``blocked`` / ``unknown``.
+        Provider-specific raw reasons may be included as ``provider_reason``.
         """
         raise NotImplementedError
         yield  # pragma: no cover – make this an async generator
@@ -52,3 +91,11 @@ class BaseLLMProvider:
 
     async def shutdown(self, model: str) -> None:
         """Optional: release model resources."""
+
+
+__all__ = [
+    "BaseLLMProvider",
+    "ProviderFinishReason",
+    "provider_finish_chunk",
+    "provider_reason_text",
+]

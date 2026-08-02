@@ -65,6 +65,7 @@ class UsageRecorder:
             try:
                 _persist_token_usage(
                     session_id=self.ctx.session_id,
+                    turn_id=str(getattr(self.ctx, "turn_id", "") or ""),
                     owner_user_id=self.owner_uid or "",
                     model=model,
                     prompt_tokens=self.total_prompt_tokens,
@@ -77,6 +78,7 @@ class UsageRecorder:
 def _persist_token_usage(
     *,
     session_id: str,
+    turn_id: str,
     owner_user_id: str,
     model: str,
     prompt_tokens: int,
@@ -92,6 +94,7 @@ def _persist_token_usage(
 
     get_memory_store().sqlite.record_token_usage(
         session_id=session_id,
+        turn_id=turn_id,
         owner_user_id=owner_user_id,
         model=model,
         prompt_tokens=prompt_tokens,

@@ -13,13 +13,19 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from yumi.core.platform.http.dependencies import CurrentIdentity
-from yumi.core.platform.plugins import has_admin_scope
+from yumi.core.platform.observability.turn_inspector import get_turn, list_turns
+from yumi.core.platform.plugins import get_memory_factory, get_session_scope, has_admin_scope
 from yumi.core.platform.runtime.accessors import ACTIVE_CONNECTIONS, EDGE_TOOLS_REGISTRY
 from yumi.core.platform.runtime.edge_naming import parse_edge_connection_key, split_edge_prefixed_tool
 from yumi.core.platform.tools.routing import list_tool_routing_traces
 from yumi.core.platform.tools.trace import list_traces, redact_traces_for_viewer
 
 router = APIRouter()
+
+
+def _require_admin(identity) -> None:
+    if not has_admin_scope(identity):
+        raise HTTPException(status_code=403, detail="Admin scope required for debug observability.")
 
 
 def _config_snapshot() -> dict:
@@ -149,8 +155,7 @@ async def debug_observability_endpoint(
 ):
     # Global view (all edges/traces across users) — admin only. In OSS single-user
     # the local identity always has admin scope, so this is a no-op there.
-    if not has_admin_scope(identity):
-        raise HTTPException(status_code=403, detail="Admin scope required for debug observability.")
+    _require_admin(identity)
     edges = _edges_snapshot()
     routing_traces = _routing_traces(limit)
     # This page answers "is the system healthy", which the metadata answers on
@@ -165,3 +170,39 @@ async def debug_observability_endpoint(
         "tool_calls": tool_calls,
         "diagnosis": _diagnose(edges, routing_traces, identity),
     }
+
+
+@router.get("/debug/turns")
+async def debug_turns_endpoint(
+    identity: CurrentIdentity,
+    session_id: str | None = None,
+    limit: int = Query(default=30, ge=1, le=100),
+):
+    """Durable chat turns plus any currently running in-memory turn."""
+    _require_admin(identity)
+    qualified = get_session_scope().qualify_session_http(identity, session_id) if session_id else None
+    durable = get_memory_factory().get_for_identity(identity).sqlite.list_turn_traces(
+        session_id=qualified,
+        limit=limit,
+    )
+    merged = {str(row.get("id") or ""): row for row in durable}
+    for row in list_turns(session_id=qualified, limit=limit):
+        merged[str(row.get("id") or "")] = row
+    rows = sorted(merged.values(), key=lambda row: str(row.get("started_at") or ""), reverse=True)[:limit]
+    return {
+        "turns": rows,
+        "retention": {
+            "kind": "durable",
+            "message": "Turn details are saved with conversation history.",
+        },
+    }
+
+
+@router.get("/debug/turns/{turn_id}")
+async def debug_turn_detail_endpoint(identity: CurrentIdentity, turn_id: str):
+    """One full turn, including LLM rounds, prompt messages, tools, and usage."""
+    _require_admin(identity)
+    turn = get_turn(turn_id) or get_memory_factory().get_for_identity(identity).sqlite.get_turn_trace(turn_id)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="Debug turn not found.")
+    return {"turn": turn}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 
 @dataclass
@@ -25,12 +26,14 @@ class TurnContext:
     think: bool = False
     timer_callback: bool = False
     owner_uid: str | None = None
+    turn_id: str = field(default_factory=lambda: uuid4().hex)
 
     loop_count: int = 0
     ephemeral_messages: list[dict] = field(default_factory=list)
     active_edge_tool_names: set[str] = field(default_factory=set)
     tool_loop_events: list[dict] = field(default_factory=list)
     last_tools: list | None = None
+    routing_summary: dict[str, Any] = field(default_factory=dict)
 
     # How long each tool took and whether it succeeded, keyed by tool_call_id.
     # Kept beside the messages rather than on them: tool messages are forwarded

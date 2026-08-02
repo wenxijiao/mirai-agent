@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from yumi.core.features.prompts.defaults import (
+from yumi.core.features.prompts.catalog import (
+    CURRENT_TIME_TEMPLATE,
     NO_VISION_IMAGE_UPLOAD_INSTRUCTION,
     UPLOAD_FILE_INSTRUCTION,
     build_tool_use_instruction,
@@ -214,7 +215,7 @@ def compose_messages(
     tail_notes: list[str] = []
     if cfg.chat_append_current_time:
         line = format_user_facing_time(datetime.now(timezone.utc), cfg.local_timezone)
-        tail_notes.append(f"[Current Time] {line}")
+        tail_notes.append(CURRENT_TIME_TEMPLATE.format(time=line))
     if tools and prompt and _UPLOAD_PATH_RE.search(prompt):
         if upload_mode == "vision":
             tail_notes.append(UPLOAD_FILE_INSTRUCTION.strip())

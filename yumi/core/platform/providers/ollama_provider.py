@@ -3,11 +3,22 @@ from __future__ import annotations
 from typing import Any, AsyncIterator
 
 import ollama
-from yumi.core.platform.providers.base import BaseLLMProvider
+from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
 from yumi.core.platform.tools.normalize import normalize_tool_calls
 from yumi.logging_config import get_logger
 
 _logger = get_logger(__name__)
+
+
+def _normalize_ollama_finish_reason(reason: Any) -> ProviderFinishReason:
+    raw = str(getattr(reason, "value", reason) or "").strip().lower()
+    if not raw or raw == "stop":
+        return "stop"
+    if raw in {"length", "max_tokens", "context_length"}:
+        return "length"
+    if raw in {"content_filter", "safety", "blocked"}:
+        return "blocked"
+    return "unknown"
 
 
 def _convert_multimodal_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -102,6 +113,11 @@ class OllamaProvider(BaseLLMProvider):
             ct = int(last_chunk.get("eval_count") or 0)
             if pt or ct:
                 yield {"type": "usage", "prompt_tokens": pt, "completion_tokens": ct, "model": model}
+        done_reason = last_chunk.get("done_reason") if last_chunk else None
+        yield provider_finish_chunk(
+            _normalize_ollama_finish_reason(done_reason),
+            provider_reason=done_reason,
+        )
 
     def embed(self, model: str, text: str) -> list[float]:
         response = ollama.embed(model=model, input=text)

@@ -2,6 +2,7 @@ import type { ReactNode } from "react"
 import { AlertTriangle, CheckCircle2, Info, RefreshCw, Stethoscope } from "lucide-react"
 import { PageBody, PageHeader } from "@/components/layout/page"
 import { Button } from "@/components/ui/button"
+import { TurnInspector } from "@/components/debug/turn-inspector"
 import { useObservability } from "@/hooks/queries"
 import { cn } from "@/lib/utils"
 import type { ObservabilityDiagnosis, ObservabilityEdge, RoutingTrace, Trace } from "@/lib/types"
@@ -112,6 +113,8 @@ export function DebugPage() {
         }
       />
       <PageBody className="space-y-6">
+        <TurnInspector />
+
         {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {isError && (
           <p className="text-sm text-destructive">

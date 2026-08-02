@@ -111,6 +111,8 @@ All paths are relative to the core base URL (e.g. `http://127.0.0.1:8000`).
 | `PUT` | `/memory/messages/{message_id}` | Update message |
 | `DELETE` | `/memory/messages/{message_id}` | Delete message |
 | `GET` | `/memory/search` | Semantic search; **required** query `query`; optional `session_id`, `limit` |
+| `GET` | `/chat/turns` | Durable execution summaries; optional `session_id`, `limit` |
+| `GET` | `/chat/turns/{turn_id}` | Complete execution detail for one historical turn |
 
 ### Config and tools
 
@@ -119,7 +121,6 @@ All paths are relative to the core base URL (e.g. `http://127.0.0.1:8000`).
 | `GET` / `PUT` / `DELETE` | `/config/system-prompt` | Global system prompt; `PUT` body `{"system_prompt":"..."}` |
 | `GET` / `PUT` | `/config/model` | Read/update model, memory, and Edge tool-routing settings; `PUT` may include `edge_tools_enable_dynamic_routing`, `edge_tools_retrieval_limit`, `openai_api_key`, `gemini_api_key`, `claude_api_key`, `deepseek_api_key`, `grok_api_key`, `openai_base_url`, `deepseek_base_url`, `grok_base_url` (non-empty key values are saved to `~/.yumi/config.json`; `GET` never returns raw keys, only `*_saved` / `*_effective` flags and saved base URLs; `embedding_provider` must be `openai`, `gemini`, `fastembed`, `ollama`, or `disabled`) |
 | `GET` / `PUT` / `DELETE` | `/config/session-prompt/{session_id}` | Per-session system prompt override |
-| `GET` / `PUT` | `/config/chat-debug` | Per-session chat NDJSON tracing: `GET` returns `enabled` and `trace_path`; `PUT` body `{"session_id":"...", "enabled": true|false}` starts/stops appending trace lines under `YUMI_DEBUG_DIR/chat_trace/`. Each turn logs `llm_provider_request` with the full provider `messages` and `tools` after prompt composition (system prompt, memory, tool results, multimodal parts). Optional `YUMI_CHAT_DEBUG_REDACT_IMAGE_DATA` shrinks logged base64 (see configuration docs). |
 | `GET` / `PUT` | `/config/ui` | UI preferences (e.g. dark mode) |
 | `GET` | `/tools` | List server and connected Edge tools |
 | `POST` | `/tools/toggle` | Enable/disable tool: `{"tool_name":"...","disabled":true}` |
@@ -147,6 +148,17 @@ Legacy string-only `detail` values still appear for older routes. Validation err
 | `GET` | `/monitor/traces/export` | NDJSON download of traces (optional `session_id`); same filter as list |
 
 Traces may be mirrored to `~/.yumi/tool_traces.jsonl` on disk (append-only); the in-memory buffer is also bounded.
+
+### Debug turn inspector
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/debug/turns` | Durable chat-turn summaries plus any currently running turn, newest first. Optional `session_id` and `limit`. Admin-only extension point for multi-user deployments. |
+| `GET` | `/debug/turns/{turn_id}` | Full turn: timeline, exact provider messages and tools, per-round usage/finish metadata, and tool results. |
+
+Turn details are recorded automatically and stored in SQLite with conversation
+history. The chat UI can fetch a user's own turn through `/chat/turns/{turn_id}`;
+the Debug endpoints remain the aggregate/admin surface.
 
 ### Statistics
 

@@ -112,7 +112,7 @@ Voice (microphone wake-word) fields — only consulted when running `yumi --serv
 - `voice_max_utterance_ms`: Hard cap (ms) for one utterance, even without silence. Default: `15000` (minimum `1000`).
 - `voice_owner_id`: Stable identifier for the voice session id (`voice_<owner>`). Set this to your Telegram user id to interleave voice and Telegram turns in each prompt. `null` falls back to `$USER`.
 
-Chat NDJSON tracing (optional): from Telegram (`/start_log` / `/end_log`), LINE, `yumi --chat`, or `PUT /config/chat-debug`, the server appends one line per JSON record to `YUMI_DEBUG_DIR/chat_trace/<session>/....ndjson` for that qualified `session_id`. Logs may contain prompts, model output, and tool args (privacy: do not share). State is in-memory only (restart clears active tracing).
+Every completed chat turn is stored automatically in SQLite alongside conversation history. The saved turn includes the exact provider messages and tools, every LLM round, tool calls/results, usage/cache metadata, finish reason, and timeline. Open **Run details** below an assistant reply in the web UI, or use `GET /chat/turns/{turn_id}`.
 
 ## Environment Variables
 
@@ -133,8 +133,7 @@ Chat NDJSON tracing (optional): from Telegram (`/start_log` / `/end_log`), LINE,
 | `XAI_API_KEY` | xAI Grok API key (when `chat_provider` is `grok`) |
 | `XAI_BASE_URL` | Optional Grok API base URL (defaults to `https://api.x.ai/v1`) |
 | `OLLAMA_HOST` | Ollama server URL (default `http://127.0.0.1:11434`; useful when Ollama runs on a different host or in Docker) |
-| `YUMI_DEBUG_DIR` | Override directory for debug artifacts (default `~/.yumi/debug`; chat traces use `chat_trace/` under this) |
-| `YUMI_CHAT_DEBUG_REDACT_IMAGE_DATA` | When `1` / `true`, inline `data:...;base64,...` image URLs inside trace NDJSON `llm_provider_request` records are replaced with short placeholders (smaller files). Does not change what is sent to the model—only what is written to disk. When chat-debug tracing is enabled for a session, traces already include the full composed provider `messages` and `tools` after `compose_messages`. |
+| `YUMI_DEBUG_DIR` | Override directory for automatic failure diagnostics and other debug artifacts (default `~/.yumi/debug`) |
 
 ### Server & Connection
 
@@ -321,7 +320,7 @@ Discord works out of the box — `discord.py` ships with `yumi-agent` (no extra 
 
 ### Behaviour notes
 
-- Commands use the `!` prefix: `!clear`, `!model`, `!system`, `!timers`, `!cancel_timer <id>`, `!start_log`, `!end_log`, `!help`.
+- Commands use the `!` prefix: `!clear`, `!model`, `!system`, `!timers`, `!cancel_timer <id>`, `!help`.
 - Tool confirmations are presented as Discord buttons (Deny / Allow / Always allow) via `discord.ui.View`.
 - Like Telegram, timer pushes (`dc_<user_id>` sessions) require the bot token to be present on the machine running `yumi --server`; the API process delivers them over Discord's REST API.
 

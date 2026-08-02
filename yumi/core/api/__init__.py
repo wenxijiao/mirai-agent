@@ -9,11 +9,8 @@ The implementation is split into:
 - ``schemas``     — request/response Pydantic models
 
 ``app`` and ``create_app`` are resolved lazily via PEP 562 ``__getattr__`` so
-that lightweight subpackages (``state``, ``chat_debug_trace``) can be imported
-without spinning up the full FastAPI app — important for breaking the
-``dispatch.trace_sink → core.api → app_factory → routers.chat → services
-→ dispatch`` import cycle that bites when the dispatch package is loaded
-before any HTTP-facing module.
+lightweight core modules can be imported without spinning up the full FastAPI
+app or creating an HTTP-layer import cycle.
 """
 
 from typing import TYPE_CHECKING, Any

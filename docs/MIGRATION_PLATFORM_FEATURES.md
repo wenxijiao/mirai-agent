@@ -59,7 +59,6 @@ paths directly, using the map below.
 | `yumi.core.api.routers.<x>` | `yumi.core.features.<x>.router` |
 | `yumi.core.api.chat` | `yumi.core.features.chat.pipeline` |
 | `yumi.core.api.chat_context` | `yumi.core.features.chat.context` |
-| `yumi.core.api.chat_debug_trace` | `yumi.core.features.chat.debug_trace` |
 | `yumi.core.api.uploads` | `yumi.core.features.uploads.service` |
 | `yumi.core.api.timers` | `yumi.core.features.proactive.scheduler` |
 | `yumi.core.api.edge` | `yumi.core.features.edge.api` |

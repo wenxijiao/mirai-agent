@@ -208,23 +208,6 @@ async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> 
         return True, ""
 
 
-async def _put_chat_debug(
-    connection: ConnectionConfig, session_id: str, enabled: bool
-) -> tuple[bool, str, dict | None]:
-    url = _api_url(connection, "/config/chat-debug")
-    headers = connection.auth_headers()
-    headers["Content-Type"] = "application/json"
-    timeout = httpx.Timeout(10.0, read=30.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.put(url, json={"session_id": session_id, "enabled": enabled}, headers=headers)
-        if r.status_code >= 400:
-            return False, r.text[:500], None
-        try:
-            return True, "", r.json()
-        except Exception:
-            return True, "", None
-
-
 async def _get_model_config(connection: ConnectionConfig) -> dict[str, Any] | None:
     url = _api_url(connection, "/config/model")
     headers = connection.auth_headers()
@@ -453,46 +436,6 @@ def build_client():
             await ctx.send("Session cleared.")
         else:
             await ctx.send(_truncate_for_discord(f"Failed to clear: {err}"))
-
-    @bot.command(name="start_log")
-    async def start_log_cmd(ctx) -> None:
-        if not _authorized(ctx.author.id):
-            await ctx.send("You are not authorized to use this bot.")
-            return
-        session_id = _session_id_for_user(ctx.author.id)
-        connection = chat_connection_config(ctx.author.id)
-        ok, err, data = await _put_chat_debug(connection, session_id, True)
-        if not ok:
-            await ctx.send(_truncate_for_discord(f"Failed to start debug log: {err}"))
-            return
-        path = (data or {}).get("trace_path") or ""
-        await ctx.send(
-            _truncate_for_discord(
-                "Chat debug logging ON for this session.\n"
-                f"Trace file: {path}\n"
-                "Logs include turn boundaries, each full LLM request (messages + tools), and stream events.\n"
-                "Optional: set YUMI_CHAT_DEBUG_REDACT_IMAGE_DATA=1 on the server to shorten inline data-URL "
-                "images in the trace file only.\n"
-                "Send /end_log to stop."
-            )
-        )
-
-    @bot.command(name="end_log")
-    async def end_log_cmd(ctx) -> None:
-        if not _authorized(ctx.author.id):
-            await ctx.send("You are not authorized to use this bot.")
-            return
-        session_id = _session_id_for_user(ctx.author.id)
-        connection = chat_connection_config(ctx.author.id)
-        ok, err, data = await _put_chat_debug(connection, session_id, False)
-        if not ok:
-            await ctx.send(_truncate_for_discord(f"Failed to end debug log: {err}"))
-            return
-        path = (data or {}).get("trace_path") or ""
-        if path:
-            await ctx.send(_truncate_for_discord(f"Chat debug logging OFF. Last trace file:\n{path}"))
-        else:
-            await ctx.send("Chat debug logging was not active for this session.")
 
     @bot.command(name="timers")
     async def timers_cmd(ctx) -> None:

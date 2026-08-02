@@ -4,6 +4,7 @@ export type Role = "user" | "assistant" | "system" | "tool"
 
 export interface ChatMessage {
   id: string
+  turn_id?: string
   role: Role
   content: string
   thought?: string
@@ -201,4 +202,96 @@ export interface Observability {
   routing_traces: RoutingTrace[]
   tool_calls: Trace[]
   diagnosis: ObservabilityDiagnosis[]
+}
+
+// ── /debug/turns payload ──
+
+export interface DebugTurnSummary {
+  trace_schema_version?: number
+  id: string
+  session_id: string
+  owner_user_id?: string
+  prompt_preview: string
+  started_at: string
+  ended_at?: string | null
+  duration_ms?: number | null
+  status: "running" | "complete" | "error" | "interrupted" | string
+  provider: string
+  model: string
+  round_count: number
+  tool_call_count: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_prompt_tokens: number
+  cache_hit_percent: number
+  finish_reason?: string | null
+  response_preview?: string
+  prompt_version?: string
+  prompt_catalog_hash?: string
+}
+
+export interface DebugTimelineEvent {
+  ts: string
+  kind: string
+  label: string
+  round?: number | null
+  status?: string | null
+  detail?: string | null
+  duration_ms?: number | null
+  tools?: string[]
+  [k: string]: unknown
+}
+
+export interface DebugPromptMessage {
+  index: number
+  role: string
+  label: string
+  content: unknown
+  content_chars: number
+  approx_tokens: number
+  name?: string
+  tool_call_id?: string
+  tool_calls?: unknown[]
+  reasoning_content?: unknown
+}
+
+export interface DebugLlmRound {
+  index: number
+  started_at: string
+  ended_at?: string | null
+  duration_ms?: number | null
+  provider: string
+  model: string
+  messages: DebugPromptMessage[]
+  tools: Record<string, unknown>[]
+  tool_names: string[]
+  usage: Record<string, unknown>
+  finish?: { reason?: string; provider_reason?: string | null; [k: string]: unknown } | null
+  tool_calls: Record<string, unknown>[]
+  tool_results: Record<string, unknown>[]
+  response_text: string
+  reasoning_text: string
+  note?: string | null
+}
+
+export interface DebugTurn {
+  trace_schema_version?: number
+  id: string
+  session_id: string
+  prompt: string
+  prompt_preview: string
+  think: boolean
+  timer_callback: boolean
+  started_at: string
+  ended_at?: string | null
+  duration_ms?: number | null
+  status: string
+  prompt_version?: string
+  prompt_catalog_hash?: string
+  routing: Record<string, unknown>
+  rounds: DebugLlmRound[]
+  timeline: DebugTimelineEvent[]
+  usage?: Record<string, unknown>
+  tool_loop_events?: Record<string, unknown>[]
+  summary: DebugTurnSummary
 }

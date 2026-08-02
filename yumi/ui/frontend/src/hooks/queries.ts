@@ -7,6 +7,9 @@ export const qk = {
   messages: (id: string) => ["messages", id] as const,
   tools: ["tools"] as const,
   observability: ["observability"] as const,
+  debugTurns: (sid?: string) => ["debug-turns", sid ?? "all"] as const,
+  debugTurn: (id?: string | null) => ["debug-turn", id ?? "none"] as const,
+  chatTurn: (id?: string | null) => ["chat-turn", id ?? "none"] as const,
   topology: ["topology"] as const,
   traces: (sid?: string) => ["traces", sid ?? "all"] as const,
   timers: ["timers"] as const,
@@ -28,6 +31,31 @@ export function useObservability(refetchMs = 0) {
     queryKey: qk.observability,
     queryFn: () => api.observability(),
     refetchInterval: refetchMs || false,
+  })
+}
+
+export function useDebugTurns(sessionId?: string, refetchMs = 0) {
+  return useQuery({
+    queryKey: qk.debugTurns(sessionId),
+    queryFn: () => api.debugTurns(sessionId),
+    refetchInterval: refetchMs || false,
+  })
+}
+
+export function useDebugTurn(turnId?: string | null, refetchMs = 0) {
+  return useQuery({
+    queryKey: qk.debugTurn(turnId),
+    queryFn: () => api.debugTurn(turnId as string),
+    enabled: !!turnId,
+    refetchInterval: refetchMs || false,
+  })
+}
+
+export function useChatTurn(turnId?: string | null, enabled = true) {
+  return useQuery({
+    queryKey: qk.chatTurn(turnId),
+    queryFn: () => api.chatTurn(turnId as string),
+    enabled: enabled && !!turnId,
   })
 }
 

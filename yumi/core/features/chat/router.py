@@ -1,21 +1,14 @@
-"""Chat and chat-debug HTTP routes."""
+"""Chat streaming and durable turn-detail HTTP routes."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from yumi.core.features.chat.debug_trace import (
-    get_trace_path,
-    start_trace,
-    stop_trace,
-)
-from yumi.core.features.chat.debug_trace import (
-    is_tracing as chat_debug_is_tracing,
-)
 from yumi.core.features.chat.pipeline import clear_session, generate_chat_events
 from yumi.core.platform.http.dependencies import CurrentIdentity
-from yumi.core.platform.http.schemas import ChatDebugRequest, ChatRequest
-from yumi.core.platform.plugins import get_quota_policy, get_session_scope
+from yumi.core.platform.http.schemas import ChatRequest
+from yumi.core.platform.observability.turn_inspector import get_turn, list_turns
+from yumi.core.platform.plugins import get_memory_factory, get_quota_policy, get_session_scope
 from yumi.core.platform.runtime.accessors import stream_event
 from yumi.core.platform.security.audit import audit_event
 
@@ -54,18 +47,36 @@ async def clear_endpoint(identity: CurrentIdentity, session_id: str = "default")
     return await clear_session(sid)
 
 
-@router.put("/config/chat-debug")
-async def put_chat_debug_endpoint(identity: CurrentIdentity, body: ChatDebugRequest):
-    sid = get_session_scope().qualify_session_http(identity, body.session_id)
-    if body.enabled:
-        path = start_trace(sid)
-        return {"status": "success", "enabled": True, "trace_path": path}
-    path = stop_trace(sid)
-    return {"status": "success", "enabled": False, "trace_path": path or ""}
+@router.get("/chat/turns")
+async def list_chat_turns_endpoint(
+    identity: CurrentIdentity,
+    session_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=500),
+):
+    """List durable execution summaries, with a live running turn overlay."""
+    scope = get_session_scope()
+    sid = scope.qualify_session_http(identity, session_id) if session_id else None
+    sqlite = get_memory_factory().get_for_identity(identity).sqlite
+    durable = sqlite.list_turn_traces(
+        session_id=sid,
+        owner_user_id=identity.user_id,
+        limit=limit,
+    )
+    live = list_turns(session_id=sid, limit=limit)
+    merged = {str(row.get("id") or ""): row for row in durable}
+    for row in live:
+        if row.get("owner_user_id") in (None, "", identity.user_id):
+            merged[str(row.get("id") or "")] = row
+    rows = sorted(merged.values(), key=lambda row: str(row.get("started_at") or ""), reverse=True)[:limit]
+    return {"turns": rows, "retention": {"kind": "durable", "message": "Saved with conversation history."}}
 
 
-@router.get("/config/chat-debug")
-async def get_chat_debug_endpoint(identity: CurrentIdentity, session_id: str = "default"):
-    sid = get_session_scope().qualify_session_http(identity, session_id)
-    p = get_trace_path(sid)
-    return {"enabled": chat_debug_is_tracing(sid), "trace_path": p or ""}
+@router.get("/chat/turns/{turn_id}")
+async def get_chat_turn_endpoint(identity: CurrentIdentity, turn_id: str):
+    """Return one complete execution trace after enforcing session ownership."""
+    sqlite = get_memory_factory().get_for_identity(identity).sqlite
+    turn = get_turn(turn_id) or sqlite.get_turn_trace(turn_id)
+    if turn is None:
+        raise HTTPException(status_code=404, detail="Turn not found.")
+    get_session_scope().ensure_session_owned_by_identity(identity, str(turn.get("session_id") or ""))
+    return {"turn": turn}

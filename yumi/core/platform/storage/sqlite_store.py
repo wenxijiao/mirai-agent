@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_CONFIG_DIR = Path.home() / ".yumi"
 YUMI_V1_TOOL_CALLS = "__yumi:v1:tc__\n"
 YUMI_V1_TOOL_RESULT = "__yumi:v1:tool__\n"
@@ -515,6 +515,136 @@ class SQLiteStore:
         out.reverse()
         return out
 
+    # ------------------------------------------------------------------
+    # Durable per-turn execution traces
+
+    def upsert_turn_trace(self, trace: dict[str, Any], *, owner_user_id: str = "") -> dict[str, Any]:
+        """Persist one complete chat execution trace.
+
+        ``detail_json`` intentionally stores the provider-ready messages, tool
+        schemas/calls/results, timeline, usage and finish metadata as one
+        version-tolerant document.  Summary columns keep list queries cheap.
+        """
+        turn_id = str(trace.get("id") or "").strip()
+        session_id = str(trace.get("session_id") or "").strip()
+        if not turn_id or not session_id:
+            raise ValueError("A turn trace requires id and session_id.")
+        summary = trace.get("summary") if isinstance(trace.get("summary"), dict) else {}
+        if not summary:
+            summary = {
+                "id": turn_id,
+                "session_id": session_id,
+                "status": trace.get("status") or "complete",
+                "started_at": trace.get("started_at") or "",
+                "ended_at": trace.get("ended_at"),
+                "duration_ms": trace.get("duration_ms"),
+            }
+        started_at = str(trace.get("started_at") or summary.get("started_at") or _utc_now())
+        try:
+            started_at_num = int(datetime.fromisoformat(started_at.replace("Z", "+00:00")).timestamp() * 1000)
+        except (TypeError, ValueError):
+            started_at_num = int(datetime.now(timezone.utc).timestamp() * 1000)
+        now = _utc_now()
+        row = {
+            "turn_id": turn_id,
+            "session_id": session_id,
+            "owner_user_id": owner_user_id or "",
+            "status": str(trace.get("status") or summary.get("status") or "complete"),
+            "started_at": started_at,
+            "started_at_num": started_at_num,
+            "ended_at": str(trace.get("ended_at") or summary.get("ended_at") or ""),
+            "provider": str(summary.get("provider") or ""),
+            "model": str(summary.get("model") or ""),
+            "summary_json": _json(summary),
+            "detail_json": _json(trace),
+            "updated_at": now,
+        }
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO turn_traces(
+                  turn_id, session_id, owner_user_id, status,
+                  started_at, started_at_num, ended_at, provider, model,
+                  summary_json, detail_json, created_at, updated_at
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(turn_id) DO UPDATE SET
+                  session_id=excluded.session_id,
+                  owner_user_id=excluded.owner_user_id,
+                  status=excluded.status,
+                  started_at=excluded.started_at,
+                  started_at_num=excluded.started_at_num,
+                  ended_at=excluded.ended_at,
+                  provider=excluded.provider,
+                  model=excluded.model,
+                  summary_json=excluded.summary_json,
+                  detail_json=excluded.detail_json,
+                  updated_at=excluded.updated_at
+                """,
+                (
+                    row["turn_id"],
+                    row["session_id"],
+                    row["owner_user_id"],
+                    row["status"],
+                    row["started_at"],
+                    row["started_at_num"],
+                    row["ended_at"],
+                    row["provider"],
+                    row["model"],
+                    row["summary_json"],
+                    row["detail_json"],
+                    now,
+                    now,
+                ),
+            )
+        return trace
+
+    def get_turn_trace(self, turn_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT detail_json FROM turn_traces WHERE turn_id=?", (turn_id,)).fetchone()
+        if row is None:
+            return None
+        value = _json_loads(row["detail_json"], None)
+        return value if isinstance(value, dict) else None
+
+    def list_turn_traces(
+        self,
+        *,
+        session_id: str | None = None,
+        owner_user_id: str | None = None,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if session_id is not None:
+            clauses.append("session_id=?")
+            params.append(session_id)
+        if owner_user_id is not None:
+            clauses.append("owner_user_id=?")
+            params.append(owner_user_id)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.extend([max(1, min(500, int(limit))), max(0, int(offset))])
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT summary_json FROM turn_traces
+                {where}
+                ORDER BY started_at_num DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            value = _json_loads(row["summary_json"], None)
+            if isinstance(value, dict):
+                out.append(value)
+        return out
+
+    def delete_turn_traces_for_session(self, session_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM turn_traces WHERE session_id=?", (session_id,))
+
     def session_turn_counts(self) -> dict[str, int]:
         """Assistant-message count per session — a proxy for conversation turns."""
         with self.connect() as conn:
@@ -690,6 +820,7 @@ class SQLiteStore:
                 "UPDATE events SET deleted_at=?, updated_at=?, revision=revision+1 WHERE session_id=? AND deleted_at IS NULL",
                 (now, now, session_id),
             )
+            conn.execute("DELETE FROM turn_traces WHERE session_id=?", (session_id,))
             self._refresh_session_stats(conn, session_id, now)
 
     def upsert_session(self, session: dict[str, Any]) -> None:
@@ -1096,6 +1227,8 @@ def _event_row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "session_id": row["session_id"],
+        "turn_id": row["turn_id"] or "",
+        "event_type": row["event_type"],
         "role": row["role"],
         "content": row["content"],
         "thought": row["thought"] or "",
@@ -1275,6 +1408,25 @@ _SCHEMA_SQL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage(created_at_num)",
+    """
+    CREATE TABLE IF NOT EXISTS turn_traces (
+      turn_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'complete',
+      started_at TEXT NOT NULL,
+      started_at_num INTEGER NOT NULL DEFAULT 0,
+      ended_at TEXT NOT NULL DEFAULT '',
+      provider TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_turn_traces_session_started ON turn_traces(session_id, started_at_num DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_turn_traces_owner_started ON turn_traces(owner_user_id, started_at_num DESC)",
     """
     CREATE TABLE IF NOT EXISTS memories (
       id TEXT PRIMARY KEY,

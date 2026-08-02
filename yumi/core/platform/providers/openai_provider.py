@@ -5,8 +5,21 @@ import os
 import uuid
 from typing import Any, AsyncIterator
 
-from yumi.core.platform.providers.base import BaseLLMProvider
+from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
 from yumi.core.platform.tools.normalize import normalize_tool_calls
+
+
+def _normalize_openai_finish_reason(reason: Any) -> ProviderFinishReason:
+    raw = str(getattr(reason, "value", reason) or "").strip().lower()
+    if not raw or raw == "stop":
+        return "stop"
+    if raw == "length":
+        return "length"
+    if raw in {"content_filter", "safety", "blocked"}:
+        return "blocked"
+    # ``tool_calls`` without a usable collected call is an abnormal/unknown
+    # terminal state. Valid tool calls take the explicit branch below.
+    return "unknown"
 
 
 def _normalize_messages_for_strict_openai_compat(
@@ -176,12 +189,16 @@ class OpenAIProvider(BaseLLMProvider):
 
         collected_tool_calls: dict[int, dict] = {}
         usage_payload = None
+        finish_reason = None
 
         async for chunk in stream:
             u = getattr(chunk, "usage", None)
             if u is not None:
                 usage_payload = u
-            delta = chunk.choices[0].delta if chunk.choices else None
+            choice = chunk.choices[0] if chunk.choices else None
+            if choice is not None and getattr(choice, "finish_reason", None) is not None:
+                finish_reason = choice.finish_reason
+            delta = choice.delta if choice is not None else None
             if delta is None:
                 continue
 
@@ -266,6 +283,12 @@ class OpenAIProvider(BaseLLMProvider):
             tool_calls_list = normalize_tool_calls(tool_calls_list)
             if tool_calls_list:
                 yield {"type": "tool_call", "tool_calls": tool_calls_list}
+                return
+
+        yield provider_finish_chunk(
+            _normalize_openai_finish_reason(finish_reason),
+            provider_reason=finish_reason,
+        )
 
     def embed(self, model: str, text: str) -> list[float]:
         response = self._sync_client.embeddings.create(model=model, input=text)

@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-08-02
+
 ### Added
 
+- Durable, versioned Turn Trace records for every conversation run, including
+  composed provider messages, exposed tools, model rounds, tool calls/results,
+  usage, cache information, raw responses, and a unified timeline.
+- A Run Details inspector in the local web UI, with structured prompt, tools,
+  usage, raw-data views, and JSON export.
+- A centralized, versioned prompt catalog so the stable system prompt can be
+  maintained in one place.
 - **Real web search** — `web_search` now runs on a pluggable provider layer
   (Tavily / Brave / Serper / self-hosted SearXNG, with a keyless DuckDuckGo
   HTML fallback) instead of the DuckDuckGo Instant Answer API, so live news
@@ -21,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fetch_webpage` tool** — fetches a public URL and returns readable page text
   so the model can read full articles behind search results; local,
   private-network, and cloud metadata URLs are blocked.
+
+### Changed
+
+- Provider adapters now normalize finish reasons across OpenAI-compatible,
+  Claude, Gemini, and Ollama backends so the agent loop can consistently decide
+  whether to stop or continue with tool execution.
+- Conversation tracing is automatic; the old opt-in chat log/debug-trace path
+  and its slash commands have been removed.
 
 ## [0.0.1] - Unreleased
 

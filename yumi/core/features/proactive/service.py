@@ -164,6 +164,8 @@ class ProactiveMessageService:
         full_text = ""
         for _ in range(3):
             tool_calls: list[dict[str, Any]] | None = None
+            finish_reason: str | None = None
+            provider_finish_reason: str | None = None
             async for chunk in self.bot.provider.chat_stream(
                 model=self.bot.model_name,
                 messages=messages,
@@ -175,7 +177,14 @@ class ProactiveMessageService:
                 elif chunk.get("type") == "tool_call":
                     tool_calls = normalize_tool_calls(chunk.get("tool_calls") or [])
                     break
+                elif chunk.get("type") == "finish":
+                    finish_reason = str(chunk.get("reason") or "unknown")
+                    raw_reason = chunk.get("provider_reason")
+                    provider_finish_reason = str(raw_reason) if raw_reason is not None else None
             if not tool_calls:
+                if finish_reason not in (None, "stop"):
+                    detail = f" ({provider_finish_reason})" if provider_finish_reason else ""
+                    raise RuntimeError(f"Proactive model response stopped with {finish_reason}{detail}.")
                 return full_text.strip()
 
             messages.append({"role": "assistant", "content": "", "tool_calls": tool_calls})

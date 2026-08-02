@@ -25,6 +25,7 @@ def test_sqlite_schema_creates_canonical_tables(tmp_path):
         "tool_policies",
         "sessions",
         "events",
+        "turn_traces",
         "memories",
         "session_summaries",
         "files",
@@ -56,7 +57,7 @@ def test_config_json_migrates_to_sqlite_and_save_keeps_legacy_mirror(monkeypatch
 
 def test_memory_writes_sqlite_events(tmp_path):
     m = Memory(session_id="s", storage_dir=tmp_path, max_recent=50)
-    user_id = m.add_message("user", "hello")
+    user_id = m.add_message("user", "hello", turn_id="turn-1")
     m.persist_openai_messages(
         [
             {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "demo", "arguments": {}}}]},
@@ -66,6 +67,7 @@ def test_memory_writes_sqlite_events(tmp_path):
 
     rows = m.list_messages(session_id="s", limit=10)
     assert rows[0]["id"] == user_id
+    assert rows[0]["turn_id"] == "turn-1"
     assert [row["role"] for row in rows] == ["user", "assistant", "tool"]
 
     ctx = m.get_context(query=None)
@@ -76,6 +78,32 @@ def test_memory_writes_sqlite_events(tmp_path):
         event_types = [row[0] for row in conn.execute("SELECT event_type FROM events ORDER BY seq")]
 
     assert event_types == ["user_message", "assistant_tool_calls", "tool_result"]
+
+
+def test_turn_trace_round_trips_complete_json(tmp_path):
+    store = SQLiteStore(tmp_path / "yumi.db")
+    trace = {
+        "id": "turn-1",
+        "session_id": "s",
+        "owner_user_id": "_local",
+        "status": "complete",
+        "started_at": "2026-08-02T01:02:03+00:00",
+        "ended_at": "2026-08-02T01:02:04+00:00",
+        "rounds": [{"messages": [{"role": "system", "content": "full prompt"}], "tools": []}],
+        "summary": {
+            "id": "turn-1",
+            "session_id": "s",
+            "status": "complete",
+            "started_at": "2026-08-02T01:02:03+00:00",
+            "provider": "openai",
+            "model": "gpt-test",
+        },
+    }
+
+    store.upsert_turn_trace(trace, owner_user_id="_local")
+
+    assert store.get_turn_trace("turn-1") == trace
+    assert store.list_turn_traces(session_id="s", owner_user_id="_local")[0]["id"] == "turn-1"
 
 
 def test_lancedb_chat_history_can_rebuild_from_sqlite_events(tmp_path):

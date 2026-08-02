@@ -104,7 +104,14 @@ def _with_metrics(message: dict, tool_metrics: dict | None) -> dict:
     return copy
 
 
-def _persist_tool_ephemeral_spans(messages: list[dict], session_id: str, bot, tool_metrics: dict | None = None) -> None:
+def _persist_tool_ephemeral_spans(
+    messages: list[dict],
+    session_id: str,
+    bot,
+    tool_metrics: dict | None = None,
+    *,
+    turn_id: str = "",
+) -> None:
     """Move completed assistant+tool spans out of the turn and into the transcript.
 
     ``tool_metrics`` (keyed by tool_call_id) is folded into the persisted copy
@@ -114,7 +121,14 @@ def _persist_tool_ephemeral_spans(messages: list[dict], session_id: str, bot, to
     spans = _assistant_tool_spans(messages)
     if not spans:
         return
-    turns = [[_with_metrics(messages[k], tool_metrics) for k in range(i, j)] for i, j in spans]
+    turns: list[list[dict]] = []
+    for i, j in spans:
+        turn: list[dict] = []
+        for k in range(i, j):
+            message = _with_metrics(messages[k], tool_metrics)
+            message["turn_id"] = turn_id
+            turn.append(message)
+        turns.append(turn)
     memory = bot.session_memory(session_id)
     for turn in turns:
         memory.persist_openai_messages(turn)
@@ -256,7 +270,13 @@ class ChatTurnService:
 
             async for event in self._run_loops(ctx, sink, active_bot, usage, normalizer, gate, dispatcher):
                 yield event
-            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
+            _persist_tool_ephemeral_spans(
+                ctx.ephemeral_messages,
+                ctx.session_id,
+                active_bot,
+                ctx.tool_metrics,
+                turn_id=ctx.turn_id,
+            )
         except Exception as exc:
             diag = sink.write_diagnostic("chat_pipeline_failed", error=exc, extra={"reason": "exception"})
             logger.exception("Chat pipeline failed session_id=%s diagnostic=%s", ctx.session_id, diag)
@@ -298,6 +318,7 @@ class ChatTurnService:
         # cache for the whole request. Newly activated edge tools are instead
         # appended to the frozen list below, preserving the existing prefix.
         turn_tools = await self._select_tools(ctx, routing_query)
+        sink.record_routing()
 
         while True:
             ctx.loop_count += 1
@@ -311,17 +332,26 @@ class ChatTurnService:
             ctx.last_tools = tools
 
             tool_calls_to_process, streamed_text, streamed_reasoning = None, "", ""
+            finish_reason: str | None = None
+            provider_finish_reason: str | None = None
             async for chunk in active_bot.chat_stream(
                 prompt=current_prompt,
                 session_id=ctx.session_id,
                 tools=tools if tools else None,
                 ephemeral_messages=ctx.ephemeral_messages,
                 think=ctx.think,
+                turn_id=ctx.turn_id,
             ):
                 ctype = chunk.get("type")
                 if ctype == "usage":
                     usage.add(chunk)
                     sink.record_provider_usage(chunk)
+                    continue
+                if ctype == "finish":
+                    finish_reason = str(chunk.get("reason") or "unknown")
+                    raw_reason = chunk.get("provider_reason")
+                    provider_finish_reason = str(raw_reason) if raw_reason is not None else None
+                    sink.record_provider_finish(chunk)
                     continue
                 if ctype == "text":
                     streamed_text += chunk["content"]
@@ -338,6 +368,29 @@ class ChatTurnService:
 
             if not tool_calls_to_process:
                 ctx.tool_format_retries = 0
+                if finish_reason not in (None, "stop"):
+                    diag = sink.write_diagnostic(
+                        "chat_provider_finish",
+                        extra={
+                            "reason": finish_reason,
+                            "provider_reason": provider_finish_reason,
+                            "streamed_text_chars": len(streamed_text),
+                            "streamed_reasoning_chars": len(streamed_reasoning),
+                        },
+                    )
+                    if finish_reason == "length":
+                        code = "YUMI_LLM_RESPONSE_TRUNCATED"
+                        content = "The model reached its output limit, so the response may be incomplete."
+                    elif finish_reason == "blocked":
+                        code = "YUMI_LLM_RESPONSE_BLOCKED"
+                        content = "The model provider blocked this response."
+                    else:
+                        code = "YUMI_LLM_FINISH_UNKNOWN"
+                        detail = f" ({provider_finish_reason})" if provider_finish_reason else ""
+                        content = f"The model stopped for an unrecognized reason{detail}."
+                    if diag:
+                        content += f" Diagnostic saved to: {diag}"
+                    yield sink.emit(ErrorEvent(code=code, content=content))
                 return
 
             outcome = normalizer.normalize(tool_calls_to_process, ctx)
@@ -361,6 +414,7 @@ class ChatTurnService:
                 continue
 
             assert outcome.tcalls is not None
+            sink.record_tool_calls(outcome.tcalls)
             asst_msg: dict = {"role": "assistant", "content": streamed_text, "tool_calls": outcome.tcalls}
             if streamed_reasoning:
                 asst_msg["reasoning_content"] = streamed_reasoning
@@ -371,7 +425,13 @@ class ChatTurnService:
                 yield sink.emit(ev)
 
             if not invocations:
-                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
+                _persist_tool_ephemeral_spans(
+                    ctx.ephemeral_messages,
+                    ctx.session_id,
+                    active_bot,
+                    ctx.tool_metrics,
+                    turn_id=ctx.turn_id,
+                )
                 current_prompt = None
                 continue
 
@@ -383,7 +443,13 @@ class ChatTurnService:
                     approved.append(inv)
 
             if not approved:
-                _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
+                _persist_tool_ephemeral_spans(
+                    ctx.ephemeral_messages,
+                    ctx.session_id,
+                    active_bot,
+                    ctx.tool_metrics,
+                    turn_id=ctx.turn_id,
+                )
                 current_prompt = None
                 continue
 
@@ -422,6 +488,7 @@ class ChatTurnService:
                         "result_preview": str(result.result)[:1000],
                     }
                 )
+                sink.record_tool_result(inv, result)
                 if result.status == "success":
                     yield sink.emit(
                         ToolStatusEvent(
@@ -467,7 +534,13 @@ class ChatTurnService:
                     except (json.JSONDecodeError, TypeError, AttributeError):
                         pass
 
-            _persist_tool_ephemeral_spans(ctx.ephemeral_messages, ctx.session_id, active_bot, ctx.tool_metrics)
+            _persist_tool_ephemeral_spans(
+                ctx.ephemeral_messages,
+                ctx.session_id,
+                active_bot,
+                ctx.tool_metrics,
+                turn_id=ctx.turn_id,
+            )
             current_prompt = None  # subsequent iterations use ephemeral_messages only
 
     # ---- helper paths -------------------------------------------------------
@@ -485,9 +558,40 @@ class ChatTurnService:
                 force_edge_tool_names=ctx.active_edge_tool_names,
             )
             tools = decision.tools
+            core_tools = list(getattr(decision, "core_tools", []) or [])
+            selected_edge_tools = list(getattr(decision, "selected_edge_tools", []) or [])
+            ctx.routing_summary = {
+                "core_count": len(core_tools),
+                "selected_edge_count": len(selected_edge_tools),
+                "total_edge_count": int(getattr(decision, "total_edge_tools", 0) or 0),
+                "dynamic_routing_enabled": bool(getattr(decision, "dynamic_routing_enabled", False)),
+                "elapsed_ms": int(getattr(decision, "elapsed_ms", 0) or 0),
+                "selected_edge_tools": [str(getattr(entry, "name", "")) for entry in selected_edge_tools],
+                "pinned_edge_tools": [
+                    str(getattr(entry, "name", "")) for entry in (getattr(decision, "pinned_edge_tools", []) or [])
+                ],
+                "forced_edge_tools": [
+                    str(getattr(entry, "name", "")) for entry in (getattr(decision, "forced_edge_tools", []) or [])
+                ],
+                "mentioned_edge_tools": [
+                    str(getattr(entry, "name", "")) for entry in (getattr(decision, "mentioned_edge_tools", []) or [])
+                ],
+                "retrieved_edge_tools": [
+                    str(getattr(entry, "name", ""))
+                    for entry in (getattr(decision, "retrieved_edge_tools", []) or [])
+                ],
+            }
         except Exception as exc:
             logger.warning("Dynamic tool routing failed; falling back to all tool schemas: %s", exc)
             tools = self.runtime.tool_catalog.all_tool_schemas(ident)
+            ctx.routing_summary = {
+                "core_count": len(tools or []),
+                "selected_edge_count": 0,
+                "total_edge_count": 0,
+                "dynamic_routing_enabled": False,
+                "elapsed_ms": 0,
+                "fallback": True,
+            }
         if ctx.timer_callback:
             tools = _exclude_delay_scheduling_tools(tools)
         return tools

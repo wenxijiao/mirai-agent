@@ -6,11 +6,33 @@ import os
 import re
 from typing import Any, AsyncIterator
 
-from yumi.core.platform.providers.base import BaseLLMProvider
+from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
 from yumi.core.platform.providers.diagnostics import short_text, write_provider_failure_diagnostic
 from yumi.logging_config import get_logger
 
 _logger = get_logger(__name__)
+
+
+def _normalize_gemini_finish_reason(reason: Any) -> ProviderFinishReason:
+    name = getattr(reason, "name", None)
+    raw = str(name or getattr(reason, "value", reason) or "").strip().upper().rsplit(".", 1)[-1]
+    if not raw or raw == "STOP":
+        return "stop"
+    if raw in {"MAX_TOKENS", "MODEL_CONTEXT_WINDOW_EXCEEDED"}:
+        return "length"
+    if raw in {
+        "SAFETY",
+        "RECITATION",
+        "BLOCKLIST",
+        "PROHIBITED_CONTENT",
+        "SPII",
+        "IMAGE_SAFETY",
+        "CONTENT_FILTER",
+    }:
+        return "blocked"
+    # Valid function calls are handled explicitly; malformed/other terminal
+    # reasons remain visible to the central loop as ``unknown``.
+    return "unknown"
 
 
 def _gemini_tool_call_has_valid_predecessor(messages: list[dict[str, Any]]) -> bool:
@@ -434,6 +456,7 @@ class GeminiProvider(BaseLLMProvider):
 
             collected_tool_calls: list[dict] = []
             last_usage = None
+            finish_reason = None
 
             async for chunk in response:
                 um = getattr(chunk, "usage_metadata", None)
@@ -443,6 +466,8 @@ class GeminiProvider(BaseLLMProvider):
                     continue
 
                 cand = chunk.candidates[0]
+                if getattr(cand, "finish_reason", None) is not None:
+                    finish_reason = cand.finish_reason
                 content = getattr(cand, "content", None)
                 if content is None:
                     continue
@@ -481,6 +506,12 @@ class GeminiProvider(BaseLLMProvider):
 
             if collected_tool_calls:
                 yield {"type": "tool_call", "tool_calls": collected_tool_calls}
+                return
+
+            yield provider_finish_chunk(
+                _normalize_gemini_finish_reason(finish_reason),
+                provider_reason=finish_reason,
+            )
         except Exception as exc:
             path = write_provider_failure_diagnostic(
                 exc=exc,

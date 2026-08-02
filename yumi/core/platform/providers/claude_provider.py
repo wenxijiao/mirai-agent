@@ -4,7 +4,19 @@ import json
 import os
 from typing import Any, AsyncIterator
 
-from yumi.core.platform.providers.base import BaseLLMProvider
+from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
+
+
+def _normalize_claude_finish_reason(reason: Any) -> ProviderFinishReason:
+    raw = str(getattr(reason, "value", reason) or "").strip().lower()
+    if not raw or raw in {"end_turn", "stop_sequence"}:
+        return "stop"
+    if raw in {"max_tokens", "model_context_window_exceeded"}:
+        return "length"
+    if raw in {"refusal", "content_filter", "safety", "blocked"}:
+        return "blocked"
+    # A valid ``tool_use`` stop is handled by the collected-tool branch.
+    return "unknown"
 
 
 def _convert_tools_to_claude(tools: list[dict] | None) -> list[dict] | None:
@@ -205,6 +217,7 @@ class ClaudeProvider(BaseLLMProvider):
         async with self._async_client.messages.stream(**kwargs) as stream:
             collected_tool_calls: list[dict] = []
             current_tool_use: dict | None = None
+            stop_reason = None
 
             async for event in stream:
                 if event.type == "content_block_start":
@@ -245,6 +258,7 @@ class ClaudeProvider(BaseLLMProvider):
             # trailing usage chunk would be lost (under-counts tool-call turns).
             try:
                 final_msg = await stream.get_final_message()
+                stop_reason = getattr(final_msg, "stop_reason", None)
                 u = getattr(final_msg, "usage", None)
                 if u is not None:
                     pt = int(getattr(u, "input_tokens", None) or 0)
@@ -271,6 +285,12 @@ class ClaudeProvider(BaseLLMProvider):
 
             if collected_tool_calls:
                 yield {"type": "tool_call", "tool_calls": collected_tool_calls}
+                return
+
+            yield provider_finish_chunk(
+                _normalize_claude_finish_reason(stop_reason),
+                provider_reason=stop_reason,
+            )
 
     def embed(self, model: str, text: str) -> list[float]:
         raise NotImplementedError(
