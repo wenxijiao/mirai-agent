@@ -30,7 +30,11 @@ jobs:
         run: python -m compileall yumi
 
       - name: Ruff
-        run: ruff check yumi tests tools && ruff format --check yumi tests tools
+        # Pinned: the formatter's line-breaking changes between releases, so an
+        # unpinned ruff turns main red with no code change. Bump deliberately.
+        run: |
+          python -m pip install "ruff==0.15.10"
+          ruff check yumi tests tools && ruff format --check yumi tests tools
 
       - name: Run pytest
         run: python -m pytest
