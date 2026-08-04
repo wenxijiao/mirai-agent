@@ -181,9 +181,13 @@ async def debug_turns_endpoint(
     """Durable chat turns plus any currently running in-memory turn."""
     _require_admin(identity)
     qualified = get_session_scope().qualify_session_http(identity, session_id) if session_id else None
-    durable = get_memory_factory().get_for_identity(identity).sqlite.list_turn_traces(
-        session_id=qualified,
-        limit=limit,
+    durable = (
+        get_memory_factory()
+        .get_for_identity(identity)
+        .sqlite.list_turn_traces(
+            session_id=qualified,
+            limit=limit,
+        )
     )
     merged = {str(row.get("id") or ""): row for row in durable}
     for row in list_turns(session_id=qualified, limit=limit):

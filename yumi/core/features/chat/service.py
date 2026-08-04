@@ -577,8 +577,7 @@ class ChatTurnService:
                     str(getattr(entry, "name", "")) for entry in (getattr(decision, "mentioned_edge_tools", []) or [])
                 ],
                 "retrieved_edge_tools": [
-                    str(getattr(entry, "name", ""))
-                    for entry in (getattr(decision, "retrieved_edge_tools", []) or [])
+                    str(getattr(entry, "name", "")) for entry in (getattr(decision, "retrieved_edge_tools", []) or [])
                 ],
             }
         except Exception as exc:

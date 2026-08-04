@@ -454,8 +454,7 @@ def end_turn(
                 int((r.get("usage") or {}).get("cached_prompt_tokens", 0) or 0) for r in turn.get("rounds", [])
             ),
             "cache_write_prompt_tokens": sum(
-                int((r.get("usage") or {}).get("cache_write_prompt_tokens", 0) or 0)
-                for r in turn.get("rounds", [])
+                int((r.get("usage") or {}).get("cache_write_prompt_tokens", 0) or 0) for r in turn.get("rounds", [])
             ),
         }
         if tool_loop_events:
