@@ -27,6 +27,31 @@ def keyword_score(query: str, content: str) -> float:
     return min(1.0, direct + overlap)
 
 
+def semantic_score(row: dict) -> float:
+    """Turn LanceDB's ``_distance`` into a similarity in (0, 1].
+
+    LanceDB attaches ``_distance``, never ``_score``, and the tables are created
+    without a metric so the default L2 applies. Vectors are not normalised at
+    embed time — ``get_vector`` returns whatever the provider gives — so the
+    cosine identity ``1 - d²/2`` would be wrong for some providers. ``1/(1+d)``
+    is monotonic in distance and bounded for any norm, which is what ranking
+    needs.
+
+    Rows from the lexical fallback carry no distance at all and score 0 here;
+    ``keyword_score`` is the evidence for those.
+    """
+    distance = row.get("_distance")
+    if distance is None:
+        return 0.0
+    try:
+        d = float(distance)
+    except (TypeError, ValueError):
+        return 0.0
+    if d != d or d < 0.0:  # NaN or nonsense from a degenerate vector
+        return 0.0
+    return 1.0 / (1.0 + d)
+
+
 def recency_score(timestamp_num: int, now_num: int) -> float:
     if timestamp_num <= 0:
         return 0.0
@@ -68,7 +93,10 @@ class HybridRetriever:
         ranked: list[MemoryCandidate] = []
         for c in candidates:
             score = (
-                c.score
+                # Weighted, not a base: a semantic hit and a lexical hit have to be
+                # comparable, because long-term rows can come from vector search
+                # while tool rows fall back to lexical in the same ranking pass.
+                0.45 * c.score
                 + 0.35 * keyword_score(query, c.content)
                 + 0.15 * recency_score(c.timestamp_num, now)
                 + 0.25 * max(0.0, min(1.0, c.importance))
@@ -107,7 +135,7 @@ class HybridRetriever:
                 session_id=str(row.get("session_id") or ""),
                 timestamp=str(row.get("updated_at") or row.get("created_at") or ""),
                 timestamp_num=int(row.get("updated_at_num") or row.get("created_at_num") or 0),
-                score=float(row.get("_score") or 0.0),
+                score=semantic_score(row),
                 importance=float(row.get("importance") or 0.0),
                 metadata={"confidence": float(row.get("confidence") or 0.0)},
             )
@@ -136,7 +164,7 @@ class HybridRetriever:
                     session_id=str(row.get("session_id") or ""),
                     timestamp=str(row.get("timestamp") or ""),
                     timestamp_num=int(row.get("timestamp_num") or 0),
-                    score=float(row.get("_score") or 0.0),
+                    score=semantic_score(row),
                     importance=float(row.get("importance") or 0.0),
                     metadata={
                         "tool_name": str(row.get("tool_name") or ""),
