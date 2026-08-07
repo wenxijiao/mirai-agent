@@ -10,29 +10,37 @@ import yumi.core.platform.runtime.accessors as _state
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from yumi.core.platform.http.dependencies import CurrentIdentity
+from yumi.core.platform.plugins.discovery import _iter_entry_points
 
 router = APIRouter()
 
-# The layers that may be installed alongside this one. Each is optional:
-# yumi-agent runs on its own, and the platform above it is not always present.
-_LAYERS = ("yumi-agent", "yumi-enterprise", "yumi-nexus")
+_SELF = "yumi-agent"
 
 
 @cache
 def installed_versions() -> dict[str, str]:
-    """What is actually installed, read from package metadata.
+    """This package's version, plus that of anything registered above it.
 
     A version declared in a source file describes the working copy; this
     describes the artefact that is running, which is the question worth being
-    able to answer about a deployment. Cached because the answer cannot change
-    without the process restarting.
+    able to answer about a deployment.
+
+    The packages above are found by asking which distributions provide a
+    ``yumi.plugins`` entry point, never by naming them — this layer does not
+    know what is installed on top of it, and a boundary test enforces that.
+    Cached because the answer cannot change without the process restarting.
     """
     found: dict[str, str] = {}
-    for name in _LAYERS:
-        try:
-            found[name] = _installed_version(name)
-        except PackageNotFoundError:
+    try:
+        found[_SELF] = _installed_version(_SELF)
+    except PackageNotFoundError:
+        pass
+
+    for ep in _iter_entry_points():
+        dist = getattr(ep, "dist", None)
+        if dist is None or not dist.name or dist.name in found:
             continue
+        found[dist.name] = dist.version
     return found
 
 
