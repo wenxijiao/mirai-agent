@@ -1,5 +1,22 @@
 import os
 from collections.abc import Sequence
+from typing import TypedDict
+
+
+class CorsSettings(TypedDict):
+    """Keyword arguments for Starlette's CORSMiddleware.
+
+    A plain ``dict[str, object]`` loses every value's type when it is splatted
+    into the middleware, so each parameter arrives as ``object`` and a type
+    checker reports one error per keyword — eight, from one return annotation.
+    Naming the shape fixes it once for every caller instead of casting at each.
+    """
+
+    allow_origins: list[str]
+    allow_credentials: bool
+    allow_methods: list[str]
+    allow_headers: list[str]
+
 
 DEFAULT_LOCAL_BROWSER_ORIGINS: tuple[str, ...] = (
     "http://127.0.0.1:3000",
@@ -40,7 +57,7 @@ def get_cors_settings(
     allow_credentials_env_var: str,
     *,
     default_origins: Sequence[str] = DEFAULT_LOCAL_BROWSER_ORIGINS,
-) -> dict[str, object]:
+) -> CorsSettings:
     env_origins = os.getenv(origins_env_var)
     origins = _parse_csv_list(env_origins) if env_origins is not None else list(default_origins)
     allow_credentials = _parse_bool_env(allow_credentials_env_var, default=False)

@@ -55,7 +55,12 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
 
       - name: Pyright
-        run: python -m pyright yumi tests
+        # Pinned for the same reason ruff is, one step above: a type checker
+        # that upgrades itself reports new errors on unchanged code. In
+        # yumi-enterprise this exact gap kept main red for three weeks.
+        run: |
+          python -m pip install "pyright==1.1.411"
+          python -m pyright yumi tests
 
   standalone-install:
     name: Standalone install
