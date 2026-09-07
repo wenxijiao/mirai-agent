@@ -83,7 +83,7 @@ class OllamaProvider(BaseLLMProvider):
             model=model,
             messages=messages,
             think=think,
-            **({"options": {"num_predict": self.max_output_tokens}} if self.max_output_tokens else {}),
+            options={"num_predict": self.max_output_tokens} if self.max_output_tokens else None,
             tools=tools,
             stream=True,
         )
