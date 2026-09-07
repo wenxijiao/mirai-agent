@@ -18,7 +18,7 @@ from yumi.core.platform.http.schemas import ChatRequest
 from yumi.core.platform.plugins import Identity
 from yumi.core.platform.runtime.assistant_context import message_media
 from yumi.core.platform.storage.sqlite_store import SQLiteStore
-from yumi.core.platform.storage.voice_store import VoiceStore
+from yumi.core.platform.storage.voice_store import VoiceStore, wav_duration
 
 
 def wav(ms=1000, sample=0):
@@ -252,3 +252,13 @@ def test_spoken_chunks_preserve_unicode_and_omit_code_and_urls():
     assert all(len(chunk) <= 1200 for chunk in chunks)
     assert " ".join(chunks) == text.strip()
     assert voice_api.spoken_chunks("```python\nunfinished()") == []
+
+
+def test_streaming_tts_wav_uses_actual_sample_duration(store):
+    streaming = bytearray(wav(1200))
+    streaming[4:8] = b"\xff" * 4
+    streaming[40:44] = b"\xff" * 4
+    assert wav_duration(bytes(streaming)) == 1200
+    row = ready(store)
+    event = save_turn(store, row)
+    assert store.save_reply(event, [(bytes(streaming), "wav")])["duration_ms"] == 1200

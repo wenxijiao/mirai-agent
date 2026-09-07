@@ -198,13 +198,13 @@ def wav_duration(raw: bytes, *, required=False):
         with wave.open(io.BytesIO(raw), "rb") as wav:
             if wav.getcomptype() != "NONE" or wav.getnchannels() not in (1, 2) or wav.getsampwidth() != 2:
                 raise ValueError("Invalid PCM recording")
-            duration = round(wav.getnframes() * 1000 / wav.getframerate())
-            if (
-                required
-                and len(wav.readframes(wav.getnframes())) != wav.getnframes() * wav.getnchannels() * wav.getsampwidth()
-            ):
+            frame_bytes = wav.getnchannels() * wav.getsampwidth()
+            frames = wav.readframes(wav.getnframes())
+            if len(frames) % frame_bytes or (required and len(frames) != wav.getnframes() * frame_bytes):
                 raise ValueError("Truncated recording")
-            return duration
+            # Streaming TTS can leave the WAV length as 0xffffffff. Measure the
+            # actual samples instead of presenting that placeholder as a duration.
+            return round(len(frames) * 1000 / frame_bytes / wav.getframerate())
     except (wave.Error, EOFError, ValueError, ZeroDivisionError):
         if required:
             raise HTTPException(422, "A valid PCM WAV recording is required.") from None
