@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 conversation_session: ContextVar[str] = ContextVar("assistant_session", default="")
 source_channel: ContextVar[str | None] = ContextVar("assistant_source_channel", default=None)
+message_media: ContextVar[dict | None] = ContextVar("assistant_message_media", default=None)
 # A reset may interrupt active generation/confirmation. Executed side effects
 # cannot be undone; all late persistence remains attached to the old segment.
 active_requests: dict[str, set] = {}

@@ -10,6 +10,8 @@ class ChatRequest(BaseModel):
     session_id: str = "default"
     think: bool = False
     personal: bool = False
+    voice_id: str | None = Field(default=None, max_length=80)
+    reply_voice: bool = False
     revision: int | None = Field(default=None, ge=1)
     channel: str = Field(default="app", pattern="^(app|telegram|discord|line)$")
 

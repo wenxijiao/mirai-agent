@@ -738,6 +738,14 @@ class SQLiteStore:
             ),
         )
         if result.rowcount:
+            voice = (_json_loads(parsed["metadata_json"], {}) or {}).get("voice")
+            if voice and parsed["event_type"] == "user_message" and voice.get("id"):
+                bound = conn.execute(
+                    "UPDATE voice_messages SET event_id=?,state='ready' WHERE id=? AND session_id=? AND (event_id='' OR event_id=?)",
+                    (parsed["id"], voice["id"], parsed["session_id"], parsed["id"]),
+                ).rowcount
+                if not bound:
+                    raise ValueError("Voice recording already belongs to another message")
             self._refresh_session_stats(conn, parsed["session_id"], now)
 
     def get_message(self, message_id: str) -> dict[str, Any] | None:
@@ -1239,6 +1247,22 @@ def _event_fields_from_message(message: dict[str, Any]) -> dict[str, Any]:
     elif role == "system":
         event_type = "system_note"
 
+    from yumi.core.platform.runtime.assistant_context import message_media
+
+    media = (message_media.get() or {}) if message.get("turn_id") else {}
+    voice = media.get("input")
+    if event_type == "user_message" and voice and raw_content.strip() == voice["transcript"].strip():
+        metadata["voice"] = voice
+    elif event_type == "assistant_message" and media.get("reply"):
+        metadata["voice"] = {
+            "id": "",
+            "kind": "assistant",
+            "turn_id": str(message.get("turn_id") or ""),
+            "transcript": raw_content,
+            "state": "pending",
+            "part_count": 0,
+        }
+
     timestamp_num = int(message.get("timestamp_num") or int(datetime.now(timezone.utc).timestamp() * 1000))
     return {
         "id": str(message.get("id") or uuid.uuid4()),
@@ -1262,6 +1286,7 @@ def _event_row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "seq": row["seq"],
+        "voice": (_json_loads(row["metadata_json"], {}) or {}).get("voice"),
         "channel": (_json_loads(row["metadata_json"], {}) or {}).get("channel")
         or _channel_from_session_id(row["session_id"]),
         "session_id": row["session_id"],

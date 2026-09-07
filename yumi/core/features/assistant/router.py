@@ -375,3 +375,7 @@ async def update_tool(identity: CurrentIdentity, name: str, body: PersonalToolRe
 from yumi.core.features.assistant.tool_runs import router as tool_runs_router  # noqa: E402
 
 router.include_router(tool_runs_router)
+
+from yumi.core.features.assistant.voice import router as voice_router  # noqa: E402
+
+router.include_router(voice_router)

@@ -36,15 +36,35 @@ async def chat_endpoint(request: Request, identity: CurrentIdentity, body: ChatR
         if body.revision is not None and body.revision != current["revision"]:
             raise HTTPException(409, "Conversation changed. Refresh before sending.")
         sid = current["session_id"]
+    media_store = None
+    if body.voice_id or body.reply_voice:
+        from yumi.core.platform.storage.voice_store import VoiceStore
+
+        media_store = VoiceStore(get_memory_factory().get_for_identity(identity).sqlite, identity.user_id)
+    if body.voice_id:
+        assert media_store is not None
+        voice = media_store.get(body.voice_id)
+        if voice["kind"] != "user" or voice["session_id"] != sid or not voice["transcript"]:
+            raise HTTPException(409, "Recording does not belong to this conversation.")
+        if voice["event_id"]:
+            raise HTTPException(409, "This voice message has already been sent.")
+        body.prompt = voice["transcript"]
     audit_event("chat_request", identity.user_id, session_id=sid)
 
     async def generate():
-        from yumi.core.platform.runtime.assistant_context import active_requests, source_channel
+        from yumi.core.platform.runtime.assistant_context import active_requests, message_media, source_channel
 
         task = asyncio.current_task()
         token = source_channel.set(body.channel if body.personal else None)
         active_requests.setdefault(sid, set()).add(task)
+        media_token = None
+        claimed = False
         try:
+            voice = media_store.claim(body.voice_id, sid) if body.voice_id and media_store else None
+            claimed = voice is not None
+            media_token = message_media.set(
+                {"input": media_store.summary(voice) if voice and media_store else None, "reply": body.reply_voice}
+            )
             if store and store.get("state")["session_id"] != sid:
                 yield stream_event(
                     "error", code="CONTEXT_CHANGED", content="Conversation restarted. Please send again."
@@ -59,7 +79,13 @@ async def chat_endpoint(request: Request, identity: CurrentIdentity, body: ChatR
                     quota.record_chat_turn(identity)
                     charged = True
                 yield stream_event(event["type"], **{k: v for k, v in event.items() if k != "type"})
+        except HTTPException as exc:
+            yield stream_event("error", code=str(exc.status_code), content=str(exc.detail))
         finally:
+            if media_token is not None:
+                message_media.reset(media_token)
+            if claimed and media_store:
+                media_store.release(body.voice_id)
             source_channel.reset(token)
             active_requests.get(sid, set()).discard(task)
             if not active_requests.get(sid):
