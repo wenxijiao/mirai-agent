@@ -85,7 +85,11 @@ class ConfirmationGate:
 
             locale = "zh" if any("\u4e00" <= char <= "\u9fff" for char in ctx.prompt) else "en"
             if personal:
-                locale = personal.get("response_language", "auto") if personal.get("response_language", "auto") != "auto" else locale
+                locale = (
+                    personal.get("response_language", "auto")
+                    if personal.get("response_language", "auto") != "auto"
+                    else locale
+                )
             inv.action_summary = action_for_invocation(inv, self.runtime, locale=locale)
             fn = inv.func_name
             own = personal.get("tools", {}).get(fn, {}) if personal else {}

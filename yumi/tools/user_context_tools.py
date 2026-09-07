@@ -53,8 +53,12 @@ def remember_user_context(content: str, kind: str = _DEFAULT_KIND, importance: f
     from yumi.core.platform.storage.assistant_store import AssistantStore
 
     if normalized_kind in BEHAVIOR_KINDS:
-        row = save_rule(AssistantStore(memory.sqlite, get_chat_owner_user_id()), normalized_content,
-                        kind=normalized_kind, source_ids=source_ids)["memory"]
+        row = save_rule(
+            AssistantStore(memory.sqlite, get_chat_owner_user_id()),
+            normalized_content,
+            kind=normalized_kind,
+            source_ids=source_ids,
+        )["memory"]
         return f"Remembered {row['kind']} memory {row['id']}: {row['content']}"
     row = memory.create_long_term_memory(
         kind=normalized_kind,
@@ -72,8 +76,12 @@ def set_response_language(language: str) -> str:
     from yumi.core.features.assistant.personalization import save_preferences
     from yumi.core.platform.storage.assistant_store import AssistantStore
 
-    saved = save_preferences(AssistantStore(_memory_store().sqlite, get_chat_owner_user_id()), response_language=language)
-    return f"Saved response language: {saved['response_language']}. This updates the same preference as Personalization."
+    saved = save_preferences(
+        AssistantStore(_memory_store().sqlite, get_chat_owner_user_id()), response_language=language
+    )
+    return (
+        f"Saved response language: {saved['response_language']}. This updates the same preference as Personalization."
+    )
 
 
 def list_user_context(kind: str = "", limit: int = 20) -> str:
@@ -86,11 +94,17 @@ def list_user_context(kind: str = "", limit: int = 20) -> str:
     memory = _memory_store()
     values = preferences(AssistantStore(memory.sqlite, get_chat_owner_user_id()))
     rows = memory.list_long_term_memories(kind=normalized_kind, session_id=_STABLE_USER_CONTEXT_SESSION, limit=10000)
-    rows = [row for row in rows if row.get("kind") not in _DISALLOWED_KINDS
-            and not (row["kind"] in BEHAVIOR_KINDS and explicit_language(row["content"]))
-            and memory.can_recall(row)][:capped]
-    lines = [f"Response language: {values['response_language']} (use set_response_language to change; auto to reset).",
-             "Stable user context memories:"]
+    rows = [
+        row
+        for row in rows
+        if row.get("kind") not in _DISALLOWED_KINDS
+        and not (row["kind"] in BEHAVIOR_KINDS and explicit_language(row["content"]))
+        and memory.can_recall(row)
+    ][:capped]
+    lines = [
+        f"Response language: {values['response_language']} (use set_response_language to change; auto to reset).",
+        "Stable user context memories:",
+    ]
     if not rows:
         lines.append("No stable user context memories are saved.")
     for row in rows:
@@ -106,15 +120,23 @@ def update_user_context(memory_id: str, content: str) -> str:
     memory = _memory_store()
     store = AssistantStore(memory.sqlite, get_chat_owner_user_id())
     preferences(store)
-    existing = next((r for r in store.memories() if r["id"] == memory_id
-                     and r["kind"] in BEHAVIOR_KINDS and r["session_id"] == _STABLE_USER_CONTEXT_SESSION), None)
+    existing = next(
+        (
+            r
+            for r in store.memories()
+            if r["id"] == memory_id and r["kind"] in BEHAVIOR_KINDS and r["session_id"] == _STABLE_USER_CONTEXT_SESSION
+        ),
+        None,
+    )
     if existing is None:
         raise ValueError("Saved preference not found. Use list_user_context to find its current id.")
     source_ids = []
     from yumi.core.platform.runtime.assistant_context import conversation_session
+
     if conversation_session.get():
-        users = [r for r in memory.sqlite.recent_transcript_rows(conversation_session.get(), 30)
-                 if r.get("role") == "user"]
+        users = [
+            r for r in memory.sqlite.recent_transcript_rows(conversation_session.get(), 30) if r.get("role") == "user"
+        ]
         if users:
             source_ids = [users[-1]["id"]]
     result = save_rule(store, content, memory_id=memory_id, kind=existing["kind"], source_ids=source_ids)

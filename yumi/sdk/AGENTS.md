@@ -27,6 +27,12 @@ An edge tool is just a normal function plus metadata:
 - `description`: when and why the model should call it.
 - `parameters`: JSON-schema-style parameter definitions.
 - `handler`: function or closure that executes in the edge process.
+- optional `confirmation_template` (Python/Rust), `confirmationTemplate`
+  (TypeScript/Dart/Swift/Kotlin/Java/C++), or `ConfirmationTemplate` (Go/C#/UE5):
+  user-facing text such as `查询「{city}」「{day}」的天气`, rendered using actual
+  arguments and schema defaults. This does not change whether approval is
+  required. Keep the technical description for the model. Python/TypeScript also
+  accept locale maps such as `{ "zh": "...", "en": "..." }`.
 - optional safety and routing flags such as confirmation, timeout, proactive
   access, and always-include.
 
@@ -577,3 +583,21 @@ Inside the `yumi-agent` source tree, if available:
 - `docs/TOOL_REGISTRATION.md`: registration flags and safety reference
 - `yumi/sdk/README.md`: maintainer-facing SDK source layout
 - `yumi/sdk/AGENTS.md`: canonical version of this file
+
+## Independently revocable Python edge pairing
+
+For a remote account server, configure `YUMI_EDGE_SERVER` plus the account's
+`YUMI_CONNECTION_CODE`. The Python SDK advertises `supports_pairing_tokens`.
+On a compatible server, `edge_paired` returns an edge-only access token bound to
+that edge name. The SDK stores it under `~/.yumi/edge_credentials/` (file mode
+0600), scoped to the server, edge name and pairing code. Reconnects use that
+credential, so rotating the account connection code does not disconnect paired
+edges. Never commit or log this directory.
+
+Revoked credentials are not silently retried with the old code. To reconnect a
+revoked edge, the user allows pairing again in Account & connections, rotates
+the code if needed, and updates the edge's code. Keep stable, distinct edge
+names for devices that should be managed independently. SDKs that do not yet
+advertise pairing-token support remain visible as legacy connections and can
+still be revoked by their owner. App-scoped login tokens are independent of
+connection-code rotation as before.

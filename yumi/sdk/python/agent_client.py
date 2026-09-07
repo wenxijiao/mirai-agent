@@ -457,6 +457,7 @@ class YumiAgent:
 
     def _pairing_file(self, ws_url: str) -> str:
         import hashlib
+
         key = hashlib.sha256(f"{ws_url}\0{self._edge_name}\0{self._connection_code or ''}".encode()).hexdigest()
         return os.path.join(os.path.expanduser("~"), ".yumi", "edge_credentials", key + ".json")
 

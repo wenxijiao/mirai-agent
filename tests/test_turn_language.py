@@ -33,7 +33,11 @@ def test_ambiguous_prompt_still_says_not_to_follow_history() -> None:
 
 
 def test_mixed_language_messages_are_not_forced_by_script_detection():
-    for prompt in ["Can you explain 这个 API design?", "这个 bug 怎么 fix 比较自然？", "今日は tired, can we keep it short?"]:
+    for prompt in [
+        "Can you explain 这个 API design?",
+        "这个 bug 怎么 fix 比较自然？",
+        "今日は tired, can we keep it short?",
+    ]:
         note = build_turn_language_note(prompt)
         assert "most natural" in note
         assert "weak hint" in note

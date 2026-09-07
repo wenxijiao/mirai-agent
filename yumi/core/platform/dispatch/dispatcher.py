@@ -374,12 +374,15 @@ class ToolDispatcher:
 
         # Recheck after a potentially long user-confirmation wait. Account/edge
         # access may have been revoked since this invocation was prepared.
-        schemas = get_edge_scope().filter_edge_tool_schemas(
-            identity, self.runtime.edge_registry.tools, set()
-        )
+        schemas = get_edge_scope().filter_edge_tool_schemas(identity, self.runtime.edge_registry.tools, set())
         if not any(schema.get("function", {}).get("name") == inv.func_name for schema in schemas):
-            return ToolResult(func_name=inv.func_name, result="Error: Tool access is no longer available.",
-                              status="error", original_tool_name=inv.original_tool_name, target_edge=inv.target_edge)
+            return ToolResult(
+                func_name=inv.func_name,
+                result="Error: Tool access is no longer available.",
+                status="error",
+                original_tool_name=inv.original_tool_name,
+                target_edge=inv.target_edge,
+            )
         return await self.edge_executor.run(inv)
 
     # ---- helpers reused by orchestrator -------------------------------------

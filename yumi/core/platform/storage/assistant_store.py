@@ -289,8 +289,10 @@ class AssistantStore:
             ).fetchall()
         keys = ("prompt_tokens", "completion_tokens", "total_tokens")
         totals = {key: 0 for key in keys}
-        by_day = {f"{month}-{day:02d}": {**totals, "requests": 0, "models": {}, "recent": []}
-                  for day in range(1, monthrange(year, number)[1] + 1)}
+        by_day = {
+            f"{month}-{day:02d}": {**totals, "requests": 0, "models": {}, "recent": []}
+            for day in range(1, monthrange(year, number)[1] + 1)
+        }
         models = {}
         for row in rows:
             day = datetime.fromtimestamp(row["created_at_num"] / 1000, zone).date().isoformat()
@@ -304,9 +306,16 @@ class AssistantStore:
             models[name] = models.get(name, 0) + row["total_tokens"]
             if len(item["recent"]) < 10:
                 item["recent"].append(dict(row))
-        return {**totals, "month": month, "timezone": timezone_name, "requests": len(rows),
-                "daily": {day: item["total_tokens"] for day, item in by_day.items()},
-                "by_day": by_day, "models": models, "recent": [dict(row) for row in rows[:30]]}
+        return {
+            **totals,
+            "month": month,
+            "timezone": timezone_name,
+            "requests": len(rows),
+            "daily": {day: item["total_tokens"] for day, item in by_day.items()},
+            "by_day": by_day,
+            "models": models,
+            "recent": [dict(row) for row in rows[:30]],
+        }
 
 
 def meaningful_recall_query(query: str) -> bool:

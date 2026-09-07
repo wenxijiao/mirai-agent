@@ -395,7 +395,9 @@ def record_stream_event(session_id: str, event: dict[str, Any]) -> None:
         content = str(event.get("content") or "")
         if round_record is not None and event_type in {"text", "thought"}:
             if content and "first_response_ms" not in turn:
-                turn["first_response_ms"] = int((time.perf_counter() - turn.get("_started", time.perf_counter())) * 1000)
+                turn["first_response_ms"] = int(
+                    (time.perf_counter() - turn.get("_started", time.perf_counter())) * 1000
+                )
             key = "response_text" if event_type == "text" else "reasoning_text"
             existing = str(round_record.get(key) or "")
             round_record[key] = existing + content

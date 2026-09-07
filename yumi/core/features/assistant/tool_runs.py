@@ -177,7 +177,9 @@ async def run_tool(name: str, body: RunRequest, identity: CurrentIdentity):
     from yumi.core.platform.tools.presentation import render_action_summary
 
     locale = preferences(assistant_store(identity))["response_language"]
-    action_summary = render_action_summary(tool.get("confirmation_template"), body.arguments, tool["parameters"], locale=locale)
+    action_summary = render_action_summary(
+        tool.get("confirmation_template"), body.arguments, tool["parameters"], locale=locale
+    )
     fingerprint = hashlib.sha256(json.dumps([name, body.arguments], sort_keys=True).encode()).hexdigest()
     state = assistant_store(identity).current(_qualify(identity))
     store = _store(identity)

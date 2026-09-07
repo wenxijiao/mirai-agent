@@ -74,7 +74,8 @@ class ChatTraceSink:
             from yumi.core.platform.http.events import TurnTimingEvent
 
             self.timing = TurnTimingEvent(
-                turn_id=self.ctx.turn_id, duration_ms=detail["duration_ms"],
+                turn_id=self.ctx.turn_id,
+                duration_ms=detail["duration_ms"],
                 confirmation_wait_ms=detail.get("confirmation_wait_ms", 0),
                 first_response_ms=detail.get("first_response_ms"),
             )

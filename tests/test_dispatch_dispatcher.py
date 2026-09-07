@@ -157,6 +157,7 @@ def test_run_all_executes_in_parallel(dispatcher):
 def test_edge_access_is_rechecked_after_preparation(dispatcher, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
+
     scope = SimpleNamespace(filter_edge_tool_schemas=lambda *_: [])
     monkeypatch.setattr("yumi.core.platform.plugins.get_edge_scope", lambda: scope)
     run = AsyncMock()
@@ -174,14 +175,23 @@ def test_internal_edge_execution_rechecks_the_actual_owner(dispatcher, monkeypat
     from yumi.core.platform.plugins.identity import Identity
 
     seen = []
+
     def visible(identity, *_):
         seen.append(identity.user_id)
         return [{"function": {"name": "edge_home_weather"}}]
-    monkeypatch.setattr("yumi.core.platform.plugins.get_edge_scope", lambda: SimpleNamespace(filter_edge_tool_schemas=visible))
-    monkeypatch.setattr("yumi.core.platform.plugins.get_identity_provider", lambda: SimpleNamespace(current=lambda: Identity(user_id="system", source="internal")))
+
+    monkeypatch.setattr(
+        "yumi.core.platform.plugins.get_edge_scope", lambda: SimpleNamespace(filter_edge_tool_schemas=visible)
+    )
+    monkeypatch.setattr(
+        "yumi.core.platform.plugins.get_identity_provider",
+        lambda: SimpleNamespace(current=lambda: Identity(user_id="system", source="internal")),
+    )
     run = AsyncMock(return_value=ToolResult(func_name="edge_home_weather", result="sunny", status="success"))
     monkeypatch.setattr(dispatcher.edge_executor, "run", run)
-    invocation = ToolInvocation(kind="edge", func_name="edge_home_weather", tool_message_name="weather", args={}, caller_user_id="alice")
+    invocation = ToolInvocation(
+        kind="edge", func_name="edge_home_weather", tool_message_name="weather", args={}, caller_user_id="alice"
+    )
     result = asyncio.run(dispatcher._run_one(invocation))
     assert result.status == "success" and seen == ["alice"]
     run.assert_awaited_once_with(invocation)

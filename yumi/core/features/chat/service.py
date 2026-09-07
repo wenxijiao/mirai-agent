@@ -331,7 +331,11 @@ class ChatTurnService:
         from yumi.core.platform.runtime.assistant_context import personal_store
         from yumi.core.platform.storage.assistant_store import is_personal_session
 
-        language = preferences(personal_store(ctx.owner_uid))["response_language"] if is_personal_session(ctx.session_id) else "auto"
+        language = (
+            preferences(personal_store(ctx.owner_uid))["response_language"]
+            if is_personal_session(ctx.session_id)
+            else "auto"
+        )
         _append_system_note(ctx, build_turn_language_note(ctx.prompt, language))
 
         # Tool routing runs ONCE per turn. Re-selecting inside the loop churned
@@ -493,7 +497,8 @@ class ChatTurnService:
                     yield sink.emit(
                         ToolStatusEvent(
                             status="running",
-                            content=inv.action_summary or f"Calling '{inv.original_tool_name}' on edge device '{inv.target_edge}'...",
+                            content=inv.action_summary
+                            or f"Calling '{inv.original_tool_name}' on edge device '{inv.target_edge}'...",
                         )
                     )
 
