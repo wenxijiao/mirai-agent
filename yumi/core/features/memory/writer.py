@@ -38,25 +38,21 @@ class MemoryWriter:
             )
 
     def observe_tool_turns(self, messages: list[dict]) -> None:
-        pending_name = ""
-        pending_args = ""
-        call_id = ""
-        for m in messages:
-            role = m.get("role")
-            if role == "assistant" and m.get("tool_calls"):
-                calls = m.get("tool_calls") or []
-                if calls:
-                    call = calls[0]
-                    fn = call.get("function") or {}
-                    pending_name = str(fn.get("name") or "tool")
-                    pending_args = _compact_json(fn.get("arguments"))
-                    call_id = str(call.get("id") or "")
-            elif role == "tool":
-                name = str(m.get("name") or pending_name or "tool")
-                content = str(m.get("content") or "")
+        calls_by_id: dict[str, dict] = {}
+        for message in messages:
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                calls_by_id = {str(c.get("id") or ""): c for c in message["tool_calls"] if c.get("id")}
+            elif message.get("role") == "tool":
+                call_id = str(message.get("tool_call_id") or "")
+                call = calls_by_id.pop(call_id, None)
+                if call is None:
+                    # Legacy imports without IDs are not evidence for a particular invocation.
+                    continue
+                fn = call.get("function") or {}
+                content = str(message.get("content") or "")
                 self.memory.create_tool_observation(
-                    tool_name=name,
-                    args_summary=pending_args,
+                    tool_name=str(fn.get("name") or "tool"),
+                    args_summary=_compact_json(fn.get("arguments")),
                     result_summary=_summarize_text(content),
                     success=not _looks_like_failure(content),
                     session_id=self.memory.session_id,
@@ -111,4 +107,6 @@ def _compact_json(value: Any, max_len: int = 500) -> str:
 
 def _looks_like_failure(text: str) -> bool:
     lowered = str(text or "").lower()
-    return any(marker in lowered for marker in ("error", "exception", "failed", "traceback"))
+    return any(
+        marker in lowered for marker in ("error", "exception", "failed", "traceback", "denied", "unknown", "timed out")
+    )

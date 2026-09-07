@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_CONFIG_DIR = Path.home() / ".yumi"
 YUMI_V1_TOOL_CALLS = "__yumi:v1:tc__\n"
 YUMI_V1_TOOL_RESULT = "__yumi:v1:tool__\n"
@@ -142,6 +142,13 @@ class SQLiteStore:
             with self.connect() as conn:
                 for statement in _SCHEMA_SQL:
                     conn.execute(statement)
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+                for name, definition in (
+                    ("usage_kind", "TEXT NOT NULL DEFAULT 'chat'"),
+                    ("estimated", "INTEGER NOT NULL DEFAULT 0"),
+                ):
+                    if name not in columns:
+                        conn.execute(f"ALTER TABLE token_usage ADD COLUMN {name} {definition}")
                 conn.execute(
                     """
                     INSERT INTO db_meta(key, value_json, updated_at)
@@ -395,6 +402,8 @@ class SQLiteStore:
         model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        usage_kind: str = "chat",
+        estimated: bool = False,
     ) -> dict[str, Any]:
         """Persist one row of token usage for a completed assistant turn."""
         prompt = max(0, int(prompt_tokens or 0))
@@ -412,6 +421,8 @@ class SQLiteStore:
             "prompt_tokens": prompt,
             "completion_tokens": completion,
             "total_tokens": total,
+            "usage_kind": usage_kind,
+            "estimated": bool(estimated),
             "created_at": now,
             "created_at_num": now_num,
         }
@@ -420,8 +431,8 @@ class SQLiteStore:
                 """
                 INSERT INTO token_usage(
                   id, session_id, turn_id, owner_user_id, provider, model,
-                  prompt_tokens, completion_tokens, total_tokens, created_at, created_at_num
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  prompt_tokens, completion_tokens, total_tokens, created_at, created_at_num, usage_kind, estimated
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -435,6 +446,8 @@ class SQLiteStore:
                     total,
                     now,
                     now_num,
+                    usage_kind,
+                    int(estimated),
                 ),
             )
         return row
@@ -446,7 +459,7 @@ class SQLiteStore:
         with self.connect() as conn:
             totals = conn.execute(
                 f"""
-                SELECT COUNT(*) AS turns,
+                SELECT COALESCE(SUM(CASE WHEN usage_kind='chat' THEN 1 ELSE 0 END), 0) AS turns,
                        COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens
@@ -457,7 +470,7 @@ class SQLiteStore:
             by_model = conn.execute(
                 f"""
                 SELECT CASE WHEN model='' THEN 'unknown' ELSE model END AS model,
-                       COUNT(*) AS turns,
+                       COALESCE(SUM(CASE WHEN usage_kind='chat' THEN 1 ELSE 0 END), 0) AS turns,
                        COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                        COALESCE(SUM(total_tokens), 0) AS total_tokens
@@ -1209,6 +1222,11 @@ def _event_fields_from_message(message: dict[str, Any]) -> dict[str, Any]:
             payload = _json_loads(raw_content[len(YUMI_V1_TOOL_RESULT) :], {}) or {}
             if isinstance(payload, dict):
                 tool_name = str(payload.get("name") or "tool")
+                tool_call_id = str(payload.get("tool_call_id") or "")
+                if isinstance(payload.get("metrics"), dict):
+                    metadata.update(
+                        {k: payload["metrics"][k] for k in ("duration_ms", "status") if k in payload["metrics"]}
+                    )
         # How long the call took and whether it failed. Attached by the chat
         # service when it copies messages for persistence, never by the
         # provider path — tool messages go to the model verbatim.

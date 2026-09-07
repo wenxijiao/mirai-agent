@@ -406,7 +406,10 @@ def _format_transcript_message(msg: dict) -> dict:
                 pass
         if peer_channel:
             return {"role": "assistant", "content": f"(via {peer_channel}) {raw}"}
-        return {"role": "assistant", "content": raw}
+        out = {"role": "assistant", "content": raw}
+        if msg.get("thought"):
+            out["reasoning_content"] = msg["thought"]
+        return out
     if msg["role"] == "user":
         if peer_channel:
             return {"role": "user", "content": f"[{msg['timestamp']}] (via {peer_channel}) {raw}"}
@@ -415,7 +418,10 @@ def _format_transcript_message(msg: dict) -> dict:
         if raw.startswith(YUMI_V1_TOOL_RESULT):
             try:
                 data = json.loads(raw[len(YUMI_V1_TOOL_RESULT) :])
-                return {"role": "tool", "name": data.get("name") or "tool", "content": str(data.get("content", ""))}
+                out = {"role": "tool", "name": data.get("name") or "tool", "content": str(data.get("content", ""))}
+                if data.get("tool_call_id"):
+                    out["tool_call_id"] = str(data["tool_call_id"])
+                return out
             except (json.JSONDecodeError, TypeError):
                 return {"role": "tool", "name": "tool", "content": raw}
         return {"role": "tool", "name": "tool", "content": raw}

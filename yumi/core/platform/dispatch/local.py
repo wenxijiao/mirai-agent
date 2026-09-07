@@ -24,8 +24,8 @@ class LocalToolExecutor:
         except asyncio.TimeoutError:
             return ToolResult(
                 func_name=inv.func_name,
-                result="Error: Local tool execution timed out.",
-                status="error",
+                result="Tool execution timed out; outcome unknown. The action may still complete. Do not automatically retry it.",
+                status="unknown",
             )
         except Exception as exc:
             return ToolResult(

@@ -1,14 +1,4 @@
-"""discover_app_tools — the model's escape hatch out of sticky tool routing.
-
-With sticky routing (``edge_tools_routing_mode="sticky"``) only the edges a
-session actually uses stay attached to the request, so the tools array — part
-of the provider's cached prompt prefix — barely ever changes. The trade-off is
-discoverability: the model can't call what it can't see. This meta tool closes
-that gap: given a natural-language need it ranks ALL connected edge tools,
-ACTIVATES the best edge for the session (sticky), and returns the matches.
-The activated tools become callable in the SAME turn via the chat loop's
-append-only forced-tools mechanism (which preserves the already-sent prefix).
-"""
+"""Find visible core/app/device functions and activate only the relevant matches."""
 
 from __future__ import annotations
 
@@ -23,13 +13,15 @@ logger = get_logger(__name__)
 
 
 def discover_app_tools(need: str, session_id: str = "default") -> str:
-    """Find tools on the user's connected apps/devices that can fulfil a need,
-    and make the best-matching app's tools available in this conversation.
+    """Find visible core/app/device tools and make matching functions available.
 
     Args:
         need: What you're trying to do, in natural language.
         session_id: Leave default; the server stamps the current session.
     """
+    from yumi.core.platform.runtime.assistant_context import conversation_session
+
+    session_id = conversation_session.get() or session_id
     need = (need or "").strip()
     if not need:
         return json.dumps({"ok": False, "error": "need is required"})
@@ -40,32 +32,54 @@ def discover_app_tools(need: str, session_id: str = "default") -> str:
         identity=get_current_identity(),
         disabled_tools=runtime.tool_policy.disabled_tools,
         edge_registry=runtime.edge_registry.tools,
-        limit=12,
+        limit=6,
+        include_core=True,
     )
     if not matches:
         return json.dumps(
             {
                 "ok": True,
                 "matches": [],
-                "note": "no connected app exposes tools for this — answer directly or tell the user",
+                "note": "no available tool matches this need — answer directly or tell the user",
             }
         )
 
-    # Activate the top match's edge for the whole session, and hand back every
-    # sibling tool name on that edge so the caller (chat service) can expose
-    # the full kit for the rest of this turn.
-    top_edge = matches[0].get("edge_key") or ""
-    activated_tool_names: list[str] = []
-    if top_edge:
-        activate_edge_for_session(session_id, top_edge)
-        edge_tools = runtime.edge_registry.tools.get(top_edge) or {}
-        activated_tool_names = sorted(edge_tools.keys())
-        logger.info(
-            "discover_app_tools activated edge %r (%d tools) for session %s",
-            top_edge,
-            len(activated_tool_names),
-            session_id,
+    from yumi.core.features.config import load_model_config
+    from yumi.core.platform.providers.budget import fit_tool_schemas
+    from yumi.core.platform.runtime.tool_catalog import model_visible_tool_schema
+    from yumi.core.platform.tools.routing import ToolCatalog
+
+    catalog = ToolCatalog(
+        identity=get_current_identity(),
+        disabled_tools=runtime.tool_policy.disabled_tools,
+        edge_registry=runtime.edge_registry.tools,
+    )
+    visible = {entry.name: entry for entry in catalog.core_tools() + catalog.edge_tools()}
+    names = [m["name"] for m in matches]
+    candidates = [
+        model_visible_tool_schema(visible[n].schema)
+        for n in dict.fromkeys(["discover_app_tools", *names])
+        if n in visible
+    ]
+    admitted = {
+        s["function"]["name"]
+        for s in fit_tool_schemas(candidates, budget=load_model_config().tool_schema_token_budget, priority_names=names)
+    }
+    matches = [m for m in matches if m["name"] in admitted]
+    if not matches:
+        return json.dumps(
+            {
+                "ok": True,
+                "matches": [],
+                "note": "Matching functions exceed the tool schema budget; narrow the search or ask the operator to adjust it.",
+            }
         )
+
+    # Activate only the matched functions. Edge activation remains useful to
+    # legacy sticky mode, but never broadens disclosure beyond visible matches.
+    activated_tool_names = [m["name"] for m in matches[:6]]
+    for edge_key in {m.get("edge_key") for m in matches[:6] if m.get("edge_key")}:
+        activate_edge_for_session(session_id, edge_key)
 
     return json.dumps(
         {
@@ -75,7 +89,7 @@ def discover_app_tools(need: str, session_id: str = "default") -> str:
             ],
             "activated_device": matches[0].get("device") or "",
             "activated_tool_names": activated_tool_names,
-            "note": "the activated device's tools are available from now on — call them directly",
+            "note": "the listed activated functions are available now; use only those needed for the task",
         },
         ensure_ascii=False,
     )

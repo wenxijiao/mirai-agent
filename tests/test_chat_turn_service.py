@@ -152,7 +152,10 @@ def test_max_tool_loops_emits_error(runtime, install_fakes):
             "tool_calls": [{"id": "c0", "function": {"name": "nope_tool", "arguments": "{}"}}],
         }
     ]
-    scripts = [chunks_per_iter for _ in range(MAX_TOOL_LOOPS + 2)]
+    scripts = [
+        [{**chunks_per_iter[0], "tool_calls": [{"id": f"c{i}", "function": {"name": "nope_tool", "arguments": {}}}]}]
+        for i in range(MAX_TOOL_LOOPS + 2)
+    ]
     bot = _FakeBot(scripted_chunks=scripts)
     install_fakes(bot)
 
@@ -161,7 +164,80 @@ def test_max_tool_loops_emits_error(runtime, install_fakes):
     errs = [e for e in events if getattr(e, "type", None) == "error"]
     assert errs, "expected an error event after exhausting tool loops"
     assert any("Maximum tool execution iterations" in e.content for e in errs)
-    assert bot.call_count == MAX_TOOL_LOOPS
+    assert bot.call_count == MAX_TOOL_LOOPS + 1
+
+
+def test_loop_limit_gets_one_final_no_tools_summary(runtime, install_fakes):
+    requests = []
+
+    class Bot(_FakeBot):
+        async def chat_stream(self, **kwargs):
+            requests.append(kwargs)
+            async for chunk in super().chat_stream(**kwargs):
+                yield chunk
+
+    scripts = [
+        [{"type": "tool_call", "tool_calls": [{"id": f"c{i}", "function": {"name": "missing_tool", "arguments": {}}}]}]
+        for i in range(MAX_TOOL_LOOPS)
+    ]
+    scripts.append(
+        [
+            {"type": "text", "content": "The requested function was unavailable; no action completed."},
+            {"type": "finish", "reason": "stop"},
+        ]
+    )
+    bot = Bot(scripts)
+    install_fakes(bot)
+    events = asyncio.run(_drain(ChatTurnService(runtime).stream_chat_turn("perform a task", "closing")))
+    assert bot.call_count == MAX_TOOL_LOOPS + 1
+    assert requests[-1]["tools"] is None
+    assert any(e.type == "text" and "no action completed" in e.content for e in events)
+    assert not any(e.type == "error" for e in events)
+
+
+def test_unknown_tool_outcome_stops_retries_and_requests_summary(runtime, install_fakes, monkeypatch):
+    from yumi.core.platform.dispatch import ToolDispatcher
+    from yumi.core.platform.dispatch.context import ToolResult
+    from yumi.core.platform.tools.tool import TOOL_REGISTRY
+
+    name = "review_timeout_tool"
+    monkeypatch.setitem(
+        TOOL_REGISTRY,
+        name,
+        {
+            "callable": lambda: None,
+            "schema": {
+                "type": "function",
+                "function": {"name": name, "parameters": {"type": "object", "properties": {}}},
+            },
+        },
+    )
+    executions = []
+
+    async def run_all(self, invocations, ctx):
+        executions.extend(invocations)
+        return [ToolResult(func_name=name, status="unknown", result="Timed out; outcome unknown") for _ in invocations]
+
+    monkeypatch.setattr(ToolDispatcher, "run_all", run_all)
+    requests = []
+
+    class Bot(_FakeBot):
+        async def chat_stream(self, **kwargs):
+            requests.append(kwargs)
+            async for chunk in super().chat_stream(**kwargs):
+                yield chunk
+
+    bot = Bot(
+        [
+            [{"type": "tool_call", "tool_calls": [{"id": "c1", "function": {"name": name, "arguments": {}}}]}],
+            [{"type": "text", "content": "The outcome is unknown."}, {"type": "finish", "reason": "stop"}],
+        ]
+    )
+    install_fakes(bot)
+    events = asyncio.run(_drain(ChatTurnService(runtime).stream_chat_turn("perform a task", "unknown")))
+    assert len(executions) == 1
+    assert requests[-1]["tools"] is None
+    assert any(e.type == "text" and "unknown" in e.content for e in events)
 
 
 def test_usage_recorded_on_tool_call_turns(runtime, install_fakes, monkeypatch):
@@ -196,9 +272,17 @@ def test_usage_recorded_on_tool_call_turns(runtime, install_fakes, monkeypatch):
 def test_persist_tool_ephemeral_spans_persists_every_completed_tool_turn():
     messages = [
         {"role": "system", "content": "ambient"},
-        {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "first", "arguments": {}}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-first", "function": {"name": "first", "arguments": {}}}],
+        },
         {"role": "tool", "tool_call_id": "call-first", "content": "one", "name": "first"},
-        {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "second", "arguments": {}}}]},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call-second", "function": {"name": "second", "arguments": {}}}],
+        },
         {"role": "tool", "tool_call_id": "call-second", "content": "two", "name": "second"},
     ]
     persisted = []

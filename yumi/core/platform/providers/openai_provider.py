@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import uuid
 from typing import Any, AsyncIterator
 
 from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
@@ -25,70 +24,22 @@ def _normalize_openai_finish_reason(reason: Any) -> ProviderFinishReason:
 def _normalize_messages_for_strict_openai_compat(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Adapt yumi's internal message shape to strict OpenAI / DeepSeek wire format.
+    """Preserve call identities and JSON-encode arguments at the wire boundary."""
+    from yumi.core.platform.tools.replay import normalize_tool_history
 
-    Two compat issues yumi's permissive internal storage glosses over but
-    strict OpenAI-compatible providers (DeepSeek, some vLLM builds) reject:
-
-    1. ``assistant.tool_calls[].function.arguments`` is stored as a Python
-       ``dict`` (see :func:`yumi.core.platform.tools.normalize.normalize_tool_calls`)
-       but the OpenAI spec says it MUST be a JSON-encoded string. OpenAI's
-       own server accepts the dict form; DeepSeek returns
-       ``messages[N]: invalid type: map, expected a string``.
-    2. ``role: tool`` messages must carry a ``tool_call_id`` matching the
-       corresponding ``assistant.tool_calls[].id``. Yumi doesn't propagate
-       these ids end-to-end (dispatcher / replay strip them), so we
-       reconstruct the pairing here by position: each consecutive tool
-       message consumes the next un-paired id from the preceding
-       assistant turn, synthesising one if necessary.
-
-    Internal representation is left alone; this only runs at the wire
-    boundary. Returns a shallow copy.
-    """
-
-    def _gen_id() -> str:
-        return f"call_{uuid.uuid4().hex[:24]}"
-
-    out: list[dict[str, Any]] = []
-    pending_ids: list[str] = []
-    for msg in messages:
-        role = msg.get("role")
-        if role == "assistant" and msg.get("tool_calls"):
-            new_calls: list[dict[str, Any]] = []
-            for tc in msg["tool_calls"]:
-                fn = tc.get("function") or {}
-                args = fn.get("arguments")
-                if isinstance(args, (dict, list)):
-                    args = json.dumps(args, ensure_ascii=False)
-                elif args is None:
-                    args = ""
-                tc_id = str(tc.get("id") or "").strip() or _gen_id()
-                new_calls.append(
-                    {
-                        **tc,
-                        "id": tc_id,
-                        "type": tc.get("type") or "function",
-                        "function": {**fn, "arguments": args},
-                    }
+    out = []
+    for message in normalize_tool_history(messages):
+        if message.get("tool_calls"):
+            calls = []
+            for call in message["tool_calls"]:
+                function = dict(call.get("function") or {})
+                args = function.get("arguments")
+                function["arguments"] = (
+                    json.dumps(args, ensure_ascii=False) if isinstance(args, (dict, list)) else (args or "")
                 )
-                pending_ids.append(tc_id)
-            out.append({**msg, "tool_calls": new_calls})
-        elif role == "tool":
-            existing = str(msg.get("tool_call_id") or "").strip()
-            if existing:
-                if pending_ids and pending_ids[0] == existing:
-                    pending_ids.pop(0)
-                elif pending_ids:
-                    # The persisted id doesn't match what we synthesised on
-                    # the assistant side this turn — trust the tool row's
-                    # existing id (it's what L1 stored) and drop one pending.
-                    pending_ids.pop(0)
-                out.append(msg)
-                continue
-            tc_id = pending_ids.pop(0) if pending_ids else _gen_id()
-            out.append({**msg, "tool_call_id": tc_id})
-        else:
-            out.append(msg)
+                calls.append({**call, "type": "function", "function": function})
+            message = {**message, "tool_calls": calls}
+        out.append(message)
     return out
 
 
@@ -152,6 +103,8 @@ class OpenAIProvider(BaseLLMProvider):
         self,
         api_key: str | None = None,
         base_url: str | None = None,
+        *,
+        api_family: str = "openai",
     ):
         try:
             from openai import AsyncOpenAI, OpenAI
@@ -164,6 +117,7 @@ class OpenAIProvider(BaseLLMProvider):
         resolved_key = api_key or os.getenv("OPENAI_API_KEY") or ""
         resolved_url = base_url or os.getenv("OPENAI_BASE_URL") or None
 
+        self.api_family = api_family
         self._sync_client = OpenAI(api_key=resolved_key, base_url=resolved_url)
         self._async_client = AsyncOpenAI(api_key=resolved_key, base_url=resolved_url)
 
@@ -174,9 +128,18 @@ class OpenAIProvider(BaseLLMProvider):
         tools: list[dict] | None = None,
         think: bool = False,
     ) -> AsyncIterator[dict]:
+        deepseek = getattr(self, "api_family", "openai") == "deepseek"
+        replay = messages if deepseek and tools and think else _strip_historical_reasoning(messages)
+        if deepseek and tools and think:
+            # DeepSeek v4 requires the reasoning field on every replayed assistant
+            # message with tools enabled, including completed previous turns.
+            replay = [
+                {**m, "reasoning_content": m.get("reasoning_content") or ""} if m.get("role") == "assistant" else m
+                for m in replay
+            ]
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": _normalize_messages_for_strict_openai_compat(_strip_historical_reasoning(messages)),
+            "messages": _normalize_messages_for_strict_openai_compat(replay),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
@@ -185,6 +148,20 @@ class OpenAIProvider(BaseLLMProvider):
         if converted_tools:
             kwargs["tools"] = converted_tools
 
+        if self.max_output_tokens:
+            kwargs[
+                "max_tokens"
+                if deepseek or not model.startswith(("o1", "o3", "o4", "gpt-5"))
+                else "max_completion_tokens"
+            ] = self.max_output_tokens
+        if deepseek:
+            kwargs["extra_body"] = {"thinking": {"type": "enabled" if think else "disabled"}}
+        yield {
+            "type": "model_settings",
+            "requested_think": think,
+            "effective_think": think if deepseek else None,
+            "thinking_control_supported": deepseek,
+        }
         stream = await self._async_client.chat.completions.create(**kwargs)
 
         collected_tool_calls: dict[int, dict] = {}
@@ -292,6 +269,9 @@ class OpenAIProvider(BaseLLMProvider):
 
     def embed(self, model: str, text: str) -> list[float]:
         response = self._sync_client.embeddings.create(model=model, input=text)
+        from yumi.core.platform.runtime.usage_context import embedding_tokens
+
+        embedding_tokens.set(getattr(getattr(response, "usage", None), "total_tokens", None))
         return list(response.data[0].embedding)
 
     def list_models(self) -> list[str]:

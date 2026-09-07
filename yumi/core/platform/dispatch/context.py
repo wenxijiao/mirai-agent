@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from yumi.core.platform.runtime.assistant_context import PromptSnapshot
+
 
 @dataclass
 class TurnContext:
@@ -30,9 +32,13 @@ class TurnContext:
     owner_uid: str | None = None
     turn_id: str = field(default_factory=lambda: uuid4().hex)
 
+    prompt_snapshot: PromptSnapshot = field(default_factory=PromptSnapshot)
+    tools_stopped_reason: str | None = None
+    closing_requested: bool = False
     loop_count: int = 0
     ephemeral_messages: list[dict] = field(default_factory=list)
     active_edge_tool_names: set[str] = field(default_factory=set)
+    recent_discovered_tools: list[str] = field(default_factory=list)
     tool_loop_events: list[dict] = field(default_factory=list)
     last_tools: list | None = None
     routing_summary: dict[str, Any] = field(default_factory=dict)
@@ -46,6 +52,7 @@ class TurnContext:
 
     # Tracks consecutive normalization failures so we can bail out cleanly.
     tool_format_retries: int = 0
+    tool_call_ids: set[str] = field(default_factory=set)
 
     # Capture before waiting for another channel's turn to release the lock.
     request_started: float = field(default_factory=time.perf_counter)
@@ -82,7 +89,7 @@ class ToolResult:
 
     func_name: str
     result: str
-    status: str  # "success" | "error"
+    status: str  # "success" | "error" | "unknown"
     original_tool_name: str | None = None
     target_edge: str | None = None
 

@@ -167,9 +167,11 @@ class EmbeddingProcessor:
         self.embedding_available = False
 
     def _spawn_re_embed(self, table_name: str, dim: int) -> None:
+        from contextvars import copy_context
+
         thread = threading.Thread(
-            target=self._background_re_embed,
-            args=(table_name, dim),
+            target=copy_context().run,
+            args=(self._background_re_embed, table_name, dim),
             name="yumi-reembed",
             daemon=True,
         )

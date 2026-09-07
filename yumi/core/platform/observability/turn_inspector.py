@@ -234,6 +234,8 @@ def record_llm_request(
             _close_round(turn, previous_round)
         safe_tools = _short(tools or [])
         index = len(turn["rounds"]) + 1
+        from yumi.core.platform.providers.budget import token_estimate
+
         round_record: dict[str, Any] = {
             "index": index,
             "started_at": _now(),
@@ -242,6 +244,11 @@ def record_llm_request(
             "provider": provider or "unknown",
             "model": model,
             "messages": _display_messages(messages, str(turn.get("prompt") or "")),
+            "input_estimate": {
+                "messages": token_estimate(messages),
+                "tools": token_estimate(tools or []),
+                "by_message": [{"role": m.get("role"), "tokens": token_estimate(m)} for m in messages],
+            },
             "tools": safe_tools,
             "tool_names": [_tool_name(tool) for tool in safe_tools],
             "usage": {},
@@ -261,6 +268,17 @@ def record_llm_request(
             round=index,
             detail=f"{provider} · {model} · {len(messages)} messages · {len(safe_tools)} tools",
         )
+
+
+def record_model_settings(session_id: str, settings: dict[str, Any]) -> None:
+    """Record what the adapter requested, separately from observed reasoning."""
+    with _lock:
+        turn = _active_turn(session_id)
+        if turn is None:
+            return
+        current = _latest_round(turn)
+        if current is not None:
+            current["model_settings"] = {k: v for k, v in settings.items() if k != "type"}
 
 
 def record_usage(session_id: str, usage: dict[str, Any]) -> None:

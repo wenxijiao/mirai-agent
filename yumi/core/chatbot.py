@@ -10,9 +10,12 @@ from yumi.core.features.prompts.composer import compose_messages, messages_have_
 from yumi.core.platform.observability import turn_inspector
 from yumi.core.platform.plugins import get_session_scope
 from yumi.core.platform.providers.base import BaseLLMProvider
+from yumi.core.platform.providers.budget import fit_prompt
 from yumi.core.platform.providers.diagnostics import provider_name, write_provider_failure_diagnostic
 from yumi.core.platform.providers.error_classify import is_multimodal_vision_rejection
+from yumi.core.platform.runtime.assistant_context import PromptSnapshot
 from yumi.core.platform.streaming.think_parser import ThinkTagParser
+from yumi.core.platform.tools.replay import normalize_tool_history
 from yumi.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +38,7 @@ class YumiBot:
         self.model_name = model_name
         self.think = think
         self._runtime_config = runtime_config
+        self.provider.max_output_tokens = (runtime_config or load_model_config()).chat_max_output_tokens
         self.memories: OrderedDict[str, Memory] = OrderedDict()
 
     def _storage_dir_for_session(self, session_id: str) -> str | None:
@@ -73,6 +77,7 @@ class YumiBot:
         ephemeral_messages: list | None = None,
         think: bool | None = None,
         turn_id: str = "",
+        prompt_snapshot: PromptSnapshot | None = None,
     ):
         """Core streaming chat flow with function-calling support."""
         memory = self._get_memory(session_id)
@@ -86,7 +91,14 @@ class YumiBot:
             ephemeral_messages=ephemeral_messages,
             cfg=cfg,
             upload_mode="vision",
+            prompt_snapshot=prompt_snapshot,
         )
+        current_index = None
+        if prompt_snapshot is not None and prompt_snapshot.messages is not None:
+            current_index = max(
+                (i for i, m in enumerate(prompt_snapshot.messages) if m.get("role") == "user"), default=None
+            )
+        messages = fit_prompt(messages, tools, budget=cfg.chat_input_token_budget, current_user_index=current_index)
         if prompt:
             user_message_id = memory.add_message("user", prompt, turn_id=turn_id)
 
@@ -108,7 +120,7 @@ class YumiBot:
                 exc=exc,
                 provider=provider_name(self.provider),
                 model=self.model_name,
-                messages=msgs,
+                messages=normalize_tool_history(msgs),
                 tools=tools,
                 session_id=session_id,
                 prompt=prompt,
@@ -121,11 +133,11 @@ class YumiBot:
             nonlocal full_response, full_thought, parser
             async for chunk in self.provider.chat_stream(
                 model=self.model_name,
-                messages=msgs,
+                messages=normalize_tool_history(msgs),
                 tools=tools,
                 think=use_think,
             ):
-                if chunk.get("type") == "usage":
+                if chunk.get("type") in {"usage", "model_settings"}:
                     yield chunk
                     continue
                 if chunk.get("type") == "finish":
@@ -190,7 +202,11 @@ class YumiBot:
                     ephemeral_messages=ephemeral_messages,
                     cfg=cfg,
                     upload_mode="no_vision",
+                    prompt_snapshot=prompt_snapshot,
                     exclude_message_ids={user_message_id} if user_message_id else None,
+                )
+                messages_fb = fit_prompt(
+                    messages_fb, tools, budget=cfg.chat_input_token_budget, current_user_index=current_index
                 )
                 turn_inspector.record_llm_request(
                     session_id,

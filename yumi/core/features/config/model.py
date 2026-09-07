@@ -55,6 +55,9 @@ class ModelConfig(BaseModel):
     # How many of the newest messages stay verbatim after a compaction.
     memory_compaction_keep_tail_messages: int = Field(default=16, ge=4, le=100)
     # Appended to the system message each chat request (can disable to save tokens / avoid English policy text).
+    chat_input_token_budget: int = Field(default=32000, ge=2048, le=512000)
+    chat_max_output_tokens: int = Field(default=4096, ge=256, le=32768)
+    tool_schema_token_budget: int = Field(default=6000, ge=1000, le=32000)
     chat_append_current_time: bool = True
     chat_append_tool_use_instruction: bool = True
     # IANA timezone (e.g. Pacific/Auckland) for user-facing wall clock: chat [Current Time],
@@ -70,7 +73,7 @@ class ModelConfig(BaseModel):
     # and expose the top edge_tools_retrieval_limit (cache-hostile: the tools
     # array can change every turn); "off" — always expose everything.
     edge_tools_enable_dynamic_routing: bool = True
-    edge_tools_routing_mode: str = Field(default="sticky", description="sticky | per_turn | off")
+    edge_tools_routing_mode: str = Field(default="sticky", description="on_demand | sticky | per_turn | off")
     edge_tools_retrieval_limit: int = Field(default=20, ge=0, le=200)
     # Sticky mode: soft cap on attached edge-tool schemas per session; the
     # least-recently-used edge is dropped when a new activation would exceed it.

@@ -17,15 +17,23 @@ class _MeteringEmbedWrapper:
         self._inner = inner
 
     def embed(self, model: str, text: str) -> list[float]:
-        out = self._inner.embed(model, text)
-        try:
-            from yumi.core.platform.plugins import get_current_identity, get_quota_policy
+        from yumi.core.platform.dispatch.auxiliary_usage import record_auxiliary_usage
+        from yumi.core.platform.providers.budget import token_estimate
+        from yumi.core.platform.runtime.usage_context import embedding_tokens, usage_operation
 
-            est = max(1, len(text) // 4)
-            get_quota_policy().record_embed_tokens(get_current_identity(), est, model=model or "unknown")
-        except Exception:
-            pass
-        return out
+        token = embedding_tokens.set(None)
+        try:
+            out = self._inner.embed(model, text)
+            actual = embedding_tokens.get()
+            record_auxiliary_usage(
+                kind=usage_operation.get(),
+                model=model or "unknown",
+                prompt_tokens=actual if actual is not None else max(1, token_estimate(text)),
+                estimated=actual is None,
+            )
+            return out
+        finally:
+            embedding_tokens.reset(token)
 
     def __getattr__(self, name: str):
         return getattr(self._inner, name)

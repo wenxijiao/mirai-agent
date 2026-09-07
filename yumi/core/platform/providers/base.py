@@ -43,6 +43,8 @@ class BaseLLMProvider:
     optional and default to no-ops.
     """
 
+    max_output_tokens: int | None = None
+
     async def chat_stream(
         self,
         model: str,

@@ -46,6 +46,29 @@ def _tcall(name: str, args: str | dict) -> dict:
     return {"id": "c1", "function": {"name": name, "arguments": args}}
 
 
+def test_disabling_tool_while_waiting_prevents_execution(dispatcher, monkeypatch):
+    calls = []
+    monkeypatch.setitem(TOOL_REGISTRY, "echo", {"callable": lambda: calls.append("executed")})
+    invocations, errors = dispatcher.prepare([_tcall("echo", {})], _ctx())
+    assert not errors
+    monkeypatch.setattr("yumi.core.platform.tools.visibility.model_disabled_tools", lambda *args, **kwargs: {"echo"})
+    result = asyncio.run(dispatcher.run_all(invocations, _ctx()))
+    assert calls == []
+    assert result[0].status == "error"
+    assert "disabled before execution" in result[0].result
+
+
+def test_timeout_is_an_unknown_outcome(monkeypatch):
+    async def timeout(*args, **kwargs):
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr("yumi.core.platform.dispatch.local.execute_registered_tool", timeout)
+    invocation = ToolInvocation(kind="local", func_name="write", tool_message_name="write", args={})
+    result = asyncio.run(LocalToolExecutor(timeout=1).run(invocation))
+    assert result.status == "unknown"
+    assert "may still complete" in result.result
+
+
 def test_canonical_strips_functions_prefix(monkeypatch):
     monkeypatch.setitem(TOOL_REGISTRY, "echo", {})
     assert canonical_local_tool_name("functions.echo") == "echo"

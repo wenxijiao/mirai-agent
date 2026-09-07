@@ -62,8 +62,8 @@ class EdgeToolExecutor:
             await self._send_cancel(inv, call_id)
             return ToolResult(
                 func_name=inv.func_name,
-                result="Error: Tool execution timed out.",
-                status="error",
+                result="Tool execution timed out; outcome unknown. The action may still complete. Do not automatically retry it.",
+                status="unknown",
                 original_tool_name=inv.original_tool_name,
                 target_edge=inv.target_edge,
             )

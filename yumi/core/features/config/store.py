@@ -99,6 +99,9 @@ def load_model_config() -> ModelConfig:
     config.edge_tools_enable_dynamic_routing = _env_bool(
         "YUMI_EDGE_TOOLS_DYNAMIC_ROUTING", config.edge_tools_enable_dynamic_routing
     )
+    routing_mode = os.getenv("YUMI_EDGE_TOOLS_ROUTING_MODE", "").strip().lower()
+    if routing_mode in {"on_demand", "sticky", "per_turn", "off"}:
+        config.edge_tools_routing_mode = routing_mode
     mode_from_env = False
     pm_env = os.getenv("YUMI_PROACTIVE_MODE")
     if pm_env and str(pm_env).strip():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -14,6 +15,7 @@ from yumi.core.features.prompts.catalog import (
     UPLOAD_FILE_INSTRUCTION,
     build_tool_use_instruction,
 )
+from yumi.core.platform.runtime.assistant_context import PromptSnapshot
 from yumi.core.platform.timezone import format_user_facing_time
 
 if TYPE_CHECKING:
@@ -192,6 +194,7 @@ def compose_messages(
     cfg: ModelConfig,
     upload_mode: Literal["vision", "no_vision"],
     exclude_message_ids: set[str] | None = None,
+    prompt_snapshot: PromptSnapshot | None = None,
 ) -> list[dict]:
     """Build messages with system extras and optional image inlining (vision vs text-only).
 
@@ -201,6 +204,18 @@ def compose_messages(
     tail system notes AFTER the transcript, so the provider prompt-cache
     prefix (tools → system → history) stays byte-identical between requests.
     """
+    stamp = memory.redaction_stamp() if hasattr(memory, "redaction_stamp") else ""
+    if prompt_snapshot is not None and prompt_snapshot.messages is not None:
+        if stamp != prompt_snapshot.redaction_stamp:
+            raise ValueError("Saved context changed during this request. Please send again.")
+        messages = deepcopy(prompt_snapshot.messages + prompt_snapshot.tool_messages)
+        extra = [m for m in (ephemeral_messages or []) if id(m) not in prompt_snapshot.initial_note_ids]
+        _add_ephemeral_messages(messages, extra)
+        if upload_mode == "no_vision" and any(
+            m.get("role") == "user" and _UPLOAD_IMAGE_PATH_RE.search(str(m.get("content") or "")) for m in messages
+        ):
+            messages.append({"role": "system", "content": NO_VISION_IMAGE_UPLOAD_INSTRUCTION.strip()})
+        return _inline_uploaded_images(messages, vision_supported=upload_mode == "vision")
     peers = _peer_session_ids(memory.session_id)
     messages = memory.get_context(query=prompt, peer_session_ids=peers, exclude_message_ids=exclude_message_ids)
     if messages and messages[0].get("role") == "system":
@@ -230,6 +245,11 @@ def compose_messages(
         messages.append({"role": "system", "content": note})
     if prompt:
         messages.append({"role": "user", "content": prompt})
+
+    if prompt_snapshot is not None:
+        prompt_snapshot.messages = deepcopy(messages)
+        prompt_snapshot.initial_note_ids = {id(m) for m in (ephemeral_messages or [])}
+        prompt_snapshot.redaction_stamp = stamp
 
     return _inline_uploaded_images(
         messages,

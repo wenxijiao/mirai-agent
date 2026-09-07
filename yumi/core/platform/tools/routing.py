@@ -1,8 +1,7 @@
 """Tool cataloging and routing for Yumi chat requests.
 
-Core Yumi tools stay loaded on every turn. Edge tools can scale into the
-hundreds or thousands, so they are ranked against the current request and only
-the most relevant schemas are exposed to the model.
+On-demand mode starts with a small core set. Additional core and edge tools
+are discovered within the turn. Legacy sticky and per-turn modes remain available.
 """
 
 import math
@@ -91,8 +90,8 @@ def clear_session_edges(session_id: str) -> None:
 
 
 _EMBED_CACHE_MAX = 5000
-_EMBED_CACHE: dict[tuple[str, str, str], list[float]] = {}
-_EMBED_CACHE_ORDER: deque[tuple[str, str, str]] = deque(maxlen=_EMBED_CACHE_MAX)
+_EMBED_CACHE: dict[str, list[float]] = {}
+_EMBED_CACHE_ORDER: deque[str] = deque(maxlen=_EMBED_CACHE_MAX)
 _EMBED_CACHE_LOCK = threading.Lock()
 
 _TOKEN_RE = re.compile(r"[\w.-]+", re.UNICODE)
@@ -336,19 +335,39 @@ def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / ((a_norm**0.5) * (b_norm**0.5))
 
 
-def _cached_embedding(model: str, text: str) -> list[float] | None:
+def _cached_embedding(model: str, text: str, *, persistent: bool = False) -> list[float] | None:
     provider = get_embed_provider()
     if provider is None or not model or not text.strip():
         return None
 
-    key = (model, str(hash(text)), text[:128])
+    from yumi.core.platform.tools.embedding_cache import cache_key, read_vector, write_vector
+
+    key = cache_key(provider, model, text)
     with _EMBED_CACHE_LOCK:
         cached = _EMBED_CACHE.get(key)
         if cached is not None:
             return cached
 
     try:
-        vec = provider.embed(model, text)
+        vec = None
+        if persistent:
+            try:
+                vec = read_vector(key)
+            except Exception:
+                logger.debug("Tool vector cache read skipped", exc_info=True)
+        if vec is None:
+            from yumi.core.platform.runtime.usage_context import usage_operation
+
+            token = usage_operation.set("tool_index" if persistent else "tool_search")
+            try:
+                vec = provider.embed(model, text)
+            finally:
+                usage_operation.reset(token)
+            if persistent and not is_degenerate_vector(vec):
+                try:
+                    write_vector(key, vec)
+                except Exception:
+                    logger.debug("Tool vector cache write skipped", exc_info=True)
     except Exception as exc:
         logger.debug("Tool routing embedding failed: %s", exc)
         return None
@@ -382,11 +401,11 @@ def _score_edge_tools_with_embeddings(
 
     scored: list[tuple[float, ToolCatalogEntry]] = []
     for entry in entries:
-        doc_vec = _cached_embedding(embed_model, entry.search_text)
+        doc_vec = _cached_embedding(embed_model, entry.search_text, persistent=True)
         if doc_vec is None:
             return None
         score = _cosine_similarity(query_vec, doc_vec)
-        device_vec = _cached_embedding(embed_model, entry.device_text) if entry.device_text else None
+        device_vec = _cached_embedding(embed_model, entry.device_text, persistent=True) if entry.device_text else None
         if device_vec is not None:
             score = (0.8 * score) + (0.2 * _cosine_similarity(query_vec, device_vec))
         scored.append((score, entry))
@@ -481,7 +500,9 @@ class ToolCatalog:
 
     def __init__(self, *, identity=None, disabled_tools: set[str], edge_registry: dict[str, dict]):
         self.identity = identity or get_current_identity()
-        self.disabled_tools = disabled_tools
+        from yumi.core.platform.tools.visibility import model_disabled_tools
+
+        self.disabled_tools = model_disabled_tools(self.identity, disabled_tools)
         self.edge_registry = edge_registry
 
     def core_tools(self) -> list[ToolCatalogEntry]:
@@ -592,9 +613,23 @@ def select_tool_schemas(
     retrieved_entries: list[ToolCatalogEntry] = []
 
     routing_mode = str(getattr(cfg, "edge_tools_routing_mode", "per_turn") or "per_turn").strip().lower()
-    if routing_mode not in {"sticky", "per_turn", "off"}:
+    if routing_mode not in {"on_demand", "sticky", "per_turn", "off"}:
         routing_mode = "per_turn"
-    if not dynamic_enabled or routing_mode == "off":
+    if dynamic_enabled and routing_mode == "on_demand":
+        # Discovery handles unfamiliar capabilities. Ordinary chat never waits
+        # for a semantic search or inherits an entire connected device.
+        common = {
+            "discover_app_tools",
+            "list_timers",
+            "get_weather",
+            "web_search",
+            "remember_user_context",
+            "set_response_language",
+            "read_file",
+        }
+        core_entries = [entry for entry in core_entries if entry.name in common]
+        selected_edge = _dedupe_entries(pinned_entries + forced_entries)
+    elif not dynamic_enabled or routing_mode == "off":
         selected_edge = edge_entries
     elif edge_entries and len(edge_entries) <= always_expose_below:
         # A small edge is always fully exposed: a freshly scaffolded edge with a few
@@ -681,6 +716,7 @@ def search_edge_tools(
     disabled_tools: set[str],
     edge_registry: dict[str, dict],
     limit: int = 12,
+    include_core: bool = False,
 ) -> list[dict[str, Any]]:
     """Rank ALL visible edge tools against a natural-language need.
 
@@ -690,16 +726,25 @@ def search_edge_tools(
     cfg = load_model_config()
     catalog = ToolCatalog(identity=identity, disabled_tools=disabled_tools, edge_registry=edge_registry)
     entries = catalog.edge_tools()
+    if include_core:
+        entries = catalog.core_tools() + entries
     if not entries:
         return []
     scored = _score_edge_tools(query or "", entries, embed_model=cfg.embedding_model)
     out: list[dict[str, Any]] = []
-    for score, entry in scored[: max(1, min(50, int(limit)))]:
+    # Zero lexical matches or weak semantic matches are not useful discoveries.
+    # A direct tool/device name match remains sufficient evidence.
+    lexical = {entry.name: score for score, entry in _score_edge_tools_lexical(query or "", entries)}
+    for score, entry in scored:
+        if lexical.get(entry.name, 0) <= 0 and (not cfg.embedding_model or score < 0.3):
+            continue
+        if len(out) >= max(1, min(50, int(limit))):
+            break
         out.append(
             {
                 "name": entry.name,
                 "description": (entry.description or "")[:300],
-                "device": entry.device_name,
+                "device": entry.device_name or "Yumi",
                 "edge_key": entry.edge_key or "",
                 "score": round(float(score), 4),
             }
@@ -739,7 +784,7 @@ def record_tool_routing_trace(
         _ROUTING_TRACES.appendleft(rec)
     selected_n = len(decision.selected_edge_tools)
     if decision.total_edge_tools > 0 and selected_n == 0:
-        logger.warning(
+        logger.debug(
             "Tool routing selected 0 of %s visible edge tool(s) for session %s — every edge "
             "tool was capped or filtered out this turn (check edge_tools_retrieval_limit; "
             "dynamic_routing=%s).",

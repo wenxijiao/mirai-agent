@@ -44,7 +44,15 @@ def persist_openai_messages(memory: Any, messages: list[dict[str, Any]]) -> None
         elif role == "tool":
             name = (m.get("name") or "tool").strip() or "tool"
             body = str(m.get("content", ""))
-            payload = json.dumps({"name": name, "content": body}, ensure_ascii=False)
+            payload = json.dumps(
+                {
+                    "name": name,
+                    "content": body,
+                    "tool_call_id": str(m.get("tool_call_id") or ""),
+                    "metrics": m.get("yumi_tool_metrics") or {},
+                },
+                ensure_ascii=False,
+            )
             memory.add_message(
                 "tool",
                 YUMI_V1_TOOL_RESULT + payload,

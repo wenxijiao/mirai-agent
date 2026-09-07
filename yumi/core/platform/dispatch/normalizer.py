@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from uuid import uuid4
 
 from yumi.core.platform.dispatch.context import TurnContext
 from yumi.core.platform.tools.normalize import normalize_tool_calls, tool_call_format_retry_user_content
@@ -48,7 +49,13 @@ class ToolCallNormalizer:
 
     def normalize(self, raw_tool_calls: list, ctx: TurnContext) -> NormalizationOutcome:
         tcalls = normalize_tool_calls(raw_tool_calls)
+        ids = [tc.get("id") for tc in tcalls if tc.get("id")]
+        if len(ids) != len(set(ids)) or set(ids) & ctx.tool_call_ids:
+            tcalls = []
         if tcalls:
+            for tc in tcalls:
+                tc["id"] = tc.get("id") or "call_" + uuid4().hex
+                ctx.tool_call_ids.add(tc["id"])
             ctx.tool_format_retries = 0
             return NormalizationOutcome(kind="ready", tcalls=tcalls)
 

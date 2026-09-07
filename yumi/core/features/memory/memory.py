@@ -280,8 +280,11 @@ class Memory:
             return {**status, "repaired": False}
         if background:
             import threading
+            from contextvars import copy_context
 
-            threading.Thread(target=self._safe_rebuild_index, daemon=True, name="yumi-index-repair").start()
+            threading.Thread(
+                target=copy_context().run, args=(self._safe_rebuild_index,), daemon=True, name="yumi-index-repair"
+            ).start()
             return {**status, "repaired": "scheduled"}
         self._safe_rebuild_index()
         return {**status, "repaired": True}
@@ -362,6 +365,9 @@ class Memory:
 
     def persist_openai_messages(self, messages: list[dict]) -> None:
         """Persist assistant+tool_calls and tool rows so ``get_context`` can replay them."""
+        from yumi.core.platform.tools.replay import normalize_tool_history
+
+        messages = normalize_tool_history(messages)
         _tool_replay_persist(self, messages)
         try:
             from yumi.core.features.memory.writer import MemoryWriter

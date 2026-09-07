@@ -45,7 +45,8 @@ def _edge_registry(count: int, *, special_name: str = "edge_lab__set_kitchen_lig
 
 
 @pytest.fixture(autouse=True)
-def _restore_tool_registry(monkeypatch):
+def _restore_tool_registry(monkeypatch, tmp_path):
+    monkeypatch.setattr("yumi.core.features.config.paths.CONFIG_DIR", tmp_path)
     original = dict(TOOL_REGISTRY)
     TOOL_REGISTRY.clear()
     TOOL_REGISTRY.update(

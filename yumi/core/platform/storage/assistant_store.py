@@ -300,13 +300,15 @@ class AssistantStore:
             for day in range(1, monthrange(year, number)[1] + 1)
         }
         models = {}
+        by_kind = {}
         for row in rows:
             day = datetime.fromtimestamp(row["created_at_num"] / 1000, zone).date().isoformat()
             item = by_day[day]
             for key in keys:
                 totals[key] += row[key]
                 item[key] += row[key]
-            item["requests"] += 1
+            item["requests"] += int(row["usage_kind"] == "chat")
+            by_kind[row["usage_kind"]] = by_kind.get(row["usage_kind"], 0) + row["total_tokens"]
             name = row["model"] or "Unknown model"
             item["models"][name] = item["models"].get(name, 0) + row["total_tokens"]
             models[name] = models.get(name, 0) + row["total_tokens"]
@@ -316,7 +318,8 @@ class AssistantStore:
             **totals,
             "month": month,
             "timezone": timezone_name,
-            "requests": len(rows),
+            "requests": sum(row["usage_kind"] == "chat" for row in rows),
+            "by_kind": by_kind,
             "daily": {day: item["total_tokens"] for day, item in by_day.items()},
             "by_day": by_day,
             "models": models,

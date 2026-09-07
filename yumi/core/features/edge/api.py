@@ -66,6 +66,9 @@ def _mount_edge_tools(connection_key: str, tool_prefix: str, tools: list) -> lis
             "proactive_context_description": schema_copy.pop("proactive_context_description", None),
         }
     EDGE_TOOLS_REGISTRY[connection_key] = registry
+    from yumi.core.platform.tools.indexing import schedule_tool_index
+
+    schedule_tool_index(connection_key, registry)
     return skipped
 
 

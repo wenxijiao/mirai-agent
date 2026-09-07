@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from copy import deepcopy
 
 from yumi.core.features.chat.context import reset_chat_owner_user_id, set_chat_owner_user_id
 from yumi.core.features.chat.language import build_turn_language_note
@@ -46,9 +47,11 @@ from yumi.core.platform.plugins import (
     get_session_scope,
 )
 from yumi.core.platform.runtime import RuntimeState, get_default_runtime
+from yumi.core.platform.runtime.assistant_context import PromptSnapshot
 from yumi.core.platform.runtime.tool_catalog import model_visible_tool_schema
 from yumi.core.platform.tools.context_prefetch import runtime_context_prompt_block
-from yumi.core.platform.tools.routing import select_tool_schemas
+from yumi.core.platform.tools.replay import normalize_tool_history
+from yumi.core.platform.tools.routing import ToolCatalog, select_tool_schemas
 from yumi.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -111,6 +114,7 @@ def _persist_tool_ephemeral_spans(
     tool_metrics: dict | None = None,
     *,
     turn_id: str = "",
+    prompt_snapshot: PromptSnapshot | None = None,
 ) -> None:
     """Move completed assistant+tool spans out of the turn and into the transcript.
 
@@ -128,10 +132,14 @@ def _persist_tool_ephemeral_spans(
             message = _with_metrics(messages[k], tool_metrics)
             message["turn_id"] = turn_id
             turn.append(message)
+        turn = normalize_tool_history(turn, strict=True)
         turns.append(turn)
     memory = bot.session_memory(session_id)
     for turn in turns:
         memory.persist_openai_messages(turn)
+    if prompt_snapshot is not None:
+        for i, j in spans:
+            prompt_snapshot.tool_messages.extend(normalize_tool_history(deepcopy(messages[i:j]), strict=True))
     for i, j in reversed(spans):
         del messages[i:j]
 
@@ -188,11 +196,17 @@ class ChatTurnService:
             timer_callback=timer_callback,
             owner_uid=owner_uid,
         )
+        from yumi.core.platform.runtime.usage_context import usage_owner_id, usage_turn_id
+
+        usage_owner_token = usage_owner_id.set(owner_uid or "")
+        usage_turn_token = usage_turn_id.set(ctx.turn_id)
         sink = ChatTraceSink(ctx)
         try:
             async for event in self._run_turn(ctx, sink):
                 yield event
         finally:
+            usage_owner_id.reset(usage_owner_token)
+            usage_turn_id.reset(usage_turn_token)
             conversation_session.reset(session_token)
             reset_chat_owner_user_id(owner_token)
 
@@ -291,6 +305,7 @@ class ChatTurnService:
                 active_bot,
                 ctx.tool_metrics,
                 turn_id=ctx.turn_id,
+                prompt_snapshot=ctx.prompt_snapshot,
             )
         except Exception as exc:
             diag = sink.write_diagnostic("chat_pipeline_failed", error=exc, extra={"reason": "exception"})
@@ -348,13 +363,23 @@ class ChatTurnService:
 
         while True:
             ctx.loop_count += 1
-            if ctx.loop_count > MAX_TOOL_LOOPS:
+            if ctx.loop_count > MAX_TOOL_LOOPS + 1:
                 async for event in self._emit_loop_exhausted(ctx, sink):
                     yield event
                 return
 
             turn_tools = self._with_forced_edge_tools(turn_tools, ctx)
-            tools = turn_tools
+            closing = ctx.loop_count > MAX_TOOL_LOOPS or ctx.tools_stopped_reason is not None
+            if closing and not ctx.closing_requested:
+                _append_system_note(
+                    ctx,
+                    "Tool execution has stopped for this request. "
+                    + (ctx.tools_stopped_reason or "The tool-loop limit was reached.")
+                    + " Do not call more tools. Give a concise final reply explaining completed work, "
+                    "failed or unknown outcomes, and what remains. Never claim an unverified action succeeded.",
+                )
+                ctx.closing_requested = True
+            tools = None if closing else turn_tools
             ctx.last_tools = tools
 
             tool_calls_to_process, streamed_text, streamed_reasoning = None, "", ""
@@ -367,8 +392,14 @@ class ChatTurnService:
                 ephemeral_messages=ctx.ephemeral_messages,
                 think=ctx.think,
                 turn_id=ctx.turn_id,
+                prompt_snapshot=ctx.prompt_snapshot,
             ):
                 ctype = chunk.get("type")
+                if ctype == "model_settings":
+                    from yumi.core.platform.observability.turn_inspector import record_model_settings
+
+                    record_model_settings(ctx.session_id, chunk)
+                    continue
                 if ctype == "usage":
                     usage.add(chunk)
                     sink.record_provider_usage(chunk)
@@ -419,6 +450,11 @@ class ChatTurnService:
                     yield sink.emit(ErrorEvent(code=code, content=content))
                 return
 
+            if closing:
+                async for event in self._emit_loop_exhausted(ctx, sink):
+                    yield event
+                return
+
             outcome = normalizer.normalize(tool_calls_to_process, ctx)
             if outcome.kind == "exhausted":
                 async for event in self._emit_normalize_exhausted(ctx, sink, tool_calls_to_process):
@@ -457,6 +493,7 @@ class ChatTurnService:
                     active_bot,
                     ctx.tool_metrics,
                     turn_id=ctx.turn_id,
+                    prompt_snapshot=ctx.prompt_snapshot,
                 )
                 current_prompt = None
                 continue
@@ -475,6 +512,7 @@ class ChatTurnService:
                     active_bot,
                     ctx.tool_metrics,
                     turn_id=ctx.turn_id,
+                    prompt_snapshot=ctx.prompt_snapshot,
                 )
                 current_prompt = None
                 continue
@@ -516,6 +554,10 @@ class ChatTurnService:
                     }
                 )
                 sink.record_tool_result(inv, result)
+                if result.status == "unknown":
+                    ctx.tools_stopped_reason = (
+                        "A tool timed out and its outcome is unknown. Do not retry the action automatically."
+                    )
                 if result.status == "success":
                     yield sink.emit(
                         ToolStatusEvent(
@@ -536,7 +578,11 @@ class ChatTurnService:
                             "result_preview": str(result.result)[:2000],
                         },
                     )
-                    content = f"Tool {result.display_label} failed."
+                    content = (
+                        f"Tool {result.display_label} timed out; its outcome is unknown."
+                        if result.status == "unknown"
+                        else f"Tool {result.display_label} failed."
+                    )
                     if diag:
                         content += f" Diagnostic saved to: {diag}"
                     yield sink.emit(ToolStatusEvent(status="error", content=content))
@@ -557,7 +603,11 @@ class ChatTurnService:
                     try:
                         payload = json.loads(str(result.result))
                         names = payload.get("activated_tool_names") or []
-                        ctx.active_edge_tool_names.update(n for n in names if isinstance(n, str))
+                        new_names = [n for n in names if isinstance(n, str)]
+                        ctx.active_edge_tool_names.update(new_names)
+                        ctx.recent_discovered_tools = new_names + [
+                            n for n in ctx.recent_discovered_tools if n not in new_names
+                        ]
                     except (json.JSONDecodeError, TypeError, AttributeError):
                         pass
 
@@ -567,6 +617,7 @@ class ChatTurnService:
                 active_bot,
                 ctx.tool_metrics,
                 turn_id=ctx.turn_id,
+                prompt_snapshot=ctx.prompt_snapshot,
             )
             current_prompt = None  # subsequent iterations use ephemeral_messages only
 
@@ -608,8 +659,8 @@ class ChatTurnService:
                 ],
             }
         except Exception as exc:
-            logger.warning("Dynamic tool routing failed; falling back to all tool schemas: %s", exc)
-            tools = self.runtime.tool_catalog.all_tool_schemas(ident)
+            logger.warning("Tool routing unavailable; continuing without tools: %s", exc)
+            tools = []
             ctx.routing_summary = {
                 "core_count": len(tools or []),
                 "selected_edge_count": 0,
@@ -642,24 +693,33 @@ class ChatTurnService:
         a full re-selection would reorder the list and invalidate the provider
         prompt cache from position zero.
         """
-        if not ctx.active_edge_tool_names:
-            return tools
-        present = {
-            t["function"].get("name")
-            for t in (tools or [])
-            if isinstance(t, dict) and isinstance(t.get("function"), dict)
-        }
-        missing = sorted(name for name in ctx.active_edge_tool_names if name not in present)
-        if not missing:
-            return tools
-        out = list(tools or [])
-        for name in missing:
-            for edge_tools in self.runtime.edge_registry.tools.values():
-                entry = edge_tools.get(name)
-                if entry and entry.get("schema"):
-                    out.append(model_visible_tool_schema(entry["schema"]))
-                    break
-        return out or None
+        from yumi.core.platform.storage.assistant_store import is_group_session
+
+        if is_group_session(ctx.session_id):
+            return None
+        catalog = ToolCatalog(
+            identity=get_current_identity(),
+            disabled_tools=self.runtime.tool_policy.disabled_tools,
+            edge_registry=self.runtime.edge_registry.tools,
+        )
+        visible = {entry.name: entry for entry in catalog.core_tools() + catalog.edge_tools()}
+        # Recheck existing schemas too: access can change during confirmation.
+        out = [t for t in (tools or []) if t.get("function", {}).get("name") in visible]
+        present = {t["function"]["name"] for t in out}
+        for name in sorted(ctx.active_edge_tool_names - present):
+            if name in visible:
+                out.append(model_visible_tool_schema(visible[name].schema))
+        from yumi.core.features.config import load_model_config
+        from yumi.core.platform.providers.budget import fit_tool_schemas
+
+        if ctx.timer_callback:
+            out = _exclude_delay_scheduling_tools(out) or []
+        return (
+            fit_tool_schemas(
+                out, budget=load_model_config().tool_schema_token_budget, priority_names=ctx.recent_discovered_tools
+            )
+            or None
+        )
 
     async def _emit_loop_exhausted(self, ctx: TurnContext, sink: ChatTraceSink) -> AsyncIterator[dict]:
         diag = sink.write_loop_diagnostic(max_tool_loops=MAX_TOOL_LOOPS)

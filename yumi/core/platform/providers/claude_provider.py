@@ -201,7 +201,7 @@ class ClaudeProvider(BaseLLMProvider):
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": claude_messages,
-            "max_tokens": _max_tokens_for_model(model),
+            "max_tokens": self.max_output_tokens or _max_tokens_for_model(model),
         }
 
         if system_text:

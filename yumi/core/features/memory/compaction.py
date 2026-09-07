@@ -114,18 +114,29 @@ async def _summarize(bot: Any, prompt_text: str) -> str:
     full = ""
     finish_reason: str | None = None
     provider_finish_reason: str | None = None
-    async for chunk in bot.provider.chat_stream(
-        model=bot.model_name,
-        messages=[{"role": "user", "content": prompt_text}],
-        tools=None,
-        think=False,
-    ):
-        if chunk.get("type") == "text":
-            full += str(chunk.get("content") or "")
-        elif chunk.get("type") == "finish":
-            finish_reason = str(chunk.get("reason") or "unknown")
-            raw_reason = chunk.get("provider_reason")
-            provider_finish_reason = str(raw_reason) if raw_reason is not None else None
+    prompt_tokens = completion_tokens = 0
+    try:
+        async for chunk in bot.provider.chat_stream(
+            model=bot.model_name,
+            messages=[{"role": "user", "content": prompt_text}],
+            tools=None,
+            think=False,
+        ):
+            if chunk.get("type") == "usage":
+                prompt_tokens += int(chunk.get("prompt_tokens") or 0)
+                completion_tokens += int(chunk.get("completion_tokens") or 0)
+            elif chunk.get("type") == "text":
+                full += str(chunk.get("content") or "")
+            elif chunk.get("type") == "finish":
+                finish_reason = str(chunk.get("reason") or "unknown")
+                raw_reason = chunk.get("provider_reason")
+                provider_finish_reason = str(raw_reason) if raw_reason is not None else None
+    finally:
+        from yumi.core.platform.dispatch.auxiliary_usage import record_auxiliary_usage
+
+        record_auxiliary_usage(
+            kind="summary", model=bot.model_name, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+        )
     if finish_reason not in (None, "stop"):
         detail = f" ({provider_finish_reason})" if provider_finish_reason else ""
         raise RuntimeError(f"Memory summary stopped with {finish_reason}{detail}.")

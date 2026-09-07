@@ -88,8 +88,15 @@ def _edge_display_name(edge_key: str) -> str:
 
 
 def _edge_summary_lines() -> list[str]:
+    from yumi.core.platform.tools.routing import ToolCatalog
+
+    entries = ToolCatalog(disabled_tools=DISABLED_TOOLS, edge_registry=EDGE_TOOLS_REGISTRY).edge_tools()
+    names = {entry.name for entry in entries}
     lines: list[str] = []
-    for edge_key, tools in sorted(EDGE_TOOLS_REGISTRY.items(), key=lambda item: item[0]):
+    for edge_key, registered in sorted(EDGE_TOOLS_REGISTRY.items(), key=lambda item: item[0]):
+        tools = {name: entry for name, entry in registered.items() if name in names}
+        if not tools:
+            continue
         pinned = sum(1 for entry in tools.values() if entry.get("always_include"))
         autorun = sum(1 for entry in tools.values() if entry.get("proactive_context"))
         confirm = sum(1 for entry in tools.values() if entry.get("require_confirmation"))

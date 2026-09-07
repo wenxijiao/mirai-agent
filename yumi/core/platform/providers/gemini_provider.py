@@ -445,6 +445,7 @@ class GeminiProvider(BaseLLMProvider):
                 model=model,
                 contents=contents,
                 config=types.GenerateContentConfig(
+                    max_output_tokens=self.max_output_tokens,
                     **config,
                     tools=gemini_tools,
                 )

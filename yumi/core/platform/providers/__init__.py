@@ -48,7 +48,7 @@ def create_provider(
         from yumi.core.platform.providers.openai_provider import OpenAIProvider
 
         base = creds["deepseek_base_url"] or DEFAULT_DEEPSEEK_BASE_URL
-        return OpenAIProvider(api_key=creds["deepseek_api_key"], base_url=base)
+        return OpenAIProvider(api_key=creds["deepseek_api_key"], base_url=base, api_family="deepseek")
 
     if provider_name == "grok":
         from yumi.core.features.config.model import DEFAULT_GROK_BASE_URL

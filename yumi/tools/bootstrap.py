@@ -28,9 +28,9 @@ def init_yumi() -> None:
     register_tool(
         discover_app_tools,
         (
-            "Search the user's CONNECTED APPS AND DEVICES for tools that can fulfil a need, "
-            "and make the best-matching app's tools available in this conversation. "
-            "USE WHEN the user asks for something an external app likely handles (tasks, "
+            "Find additional Yumi, connected-app and device tools for a specific need, "
+            "and make the matching functions available in this conversation. "
+            "USE WHEN you need a function not currently listed (timers, files, preferences, tasks, "
             "vocabulary, smart-home, notes…) but you don't currently see a matching tool in "
             "your list. After it returns, call the activated tools directly. "
             "Do NOT use it for things you can already do with a visible tool."

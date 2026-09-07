@@ -315,7 +315,18 @@ class ToolDispatcher:
 
     async def _timed_run_one(self, inv: ToolInvocation, ctx: TurnContext) -> ToolResult:
         t0 = time.perf_counter()
-        result = await self._run_one(inv)
+        from yumi.core.platform.plugins import get_current_identity
+        from yumi.core.platform.tools.visibility import model_disabled_tools
+
+        disabled = model_disabled_tools(
+            get_current_identity(), self.runtime.tool_policy.disabled_tools, session_id=ctx.session_id
+        )
+        if inv.func_name in disabled:
+            result = ToolResult(
+                func_name=inv.func_name, result="Denied: tool access was disabled before execution.", status="error"
+            )
+        else:
+            result = await self._run_one(inv)
         dt_ms = int((time.perf_counter() - t0) * 1000)
         display = inv.original_tool_name if inv.kind == "edge" and inv.original_tool_name else inv.func_name
         # Same numbers as the trace below, but kept for the durable transcript:
