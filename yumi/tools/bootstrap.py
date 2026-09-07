@@ -6,6 +6,7 @@ Built-in tools are plain functions registered explicitly via
 
 from __future__ import annotations
 
+from yumi.core.features.assistant.personalization import MEMORY_CLASSIFICATION_GUIDANCE
 from yumi.core.features.proactive.timer_tools import cancel_timer, list_timers, schedule_task, set_timer
 from yumi.core.platform.tools.tool import register_tool
 from yumi.tools.edge_discovery_tools import discover_app_tools
@@ -226,14 +227,16 @@ def init_yumi() -> None:
         (
             "Save a durable Stable User Context memory. Use this only when the user explicitly asks "
             "Yumi to remember something, or when they confirm a suggested memory should be saved. "
-            "Do not use it for ordinary transient chat details. Preferences share the app list. "
+            "Do not use it for ordinary transient chat details. " + MEMORY_CLASSIFICATION_GUIDANCE + " "
             "When changing an existing preference, list it and use update_user_context with its id instead of adding a conflicting entry."
         ),
         params={
             "content": "The concise durable memory to save.",
             "kind": (
                 "Memory category, such as profile, preference, routine, project, relationship, "
-                "constraint, communication_style, do_not_assume, fact, decision, task_state, or summary."
+                "constraint, communication_style, do_not_assume, fact, decision, task_state, or summary. "
+                "Use profile for personal tastes and dietary restrictions (About you). Reserve preference/communication_style/"
+                "constraint/do_not_assume for instructions about how Yumi responds or works, not personal characteristics."
             ),
             "importance": "0.0 to 1.0 importance score. Use 0.85 for normal explicit user memories.",
         },

@@ -202,6 +202,13 @@ async def edit_memory(identity: CurrentIdentity, memory_id: str, body: MemoryReq
     existing = next(r for r in _store(identity).memories() if r["id"] == memory_id)
     if existing["content"].strip() == body.content.strip() and existing["kind"] == body.kind:
         return {"memory": existing}
+    # A category-only edit is not forgetting and re-saving the information.
+    # Preserve its id and provenance so recall redactions do not hide it.
+    if existing["content"].strip() == body.content.strip():
+        row = _store(identity).reclassify_memory(memory_id, body.kind)
+        if row is None:
+            raise HTTPException(404, "Memory not found")
+        return {"memory": row}
     from .personalization import BEHAVIOR_KINDS, save_rule
 
     if (

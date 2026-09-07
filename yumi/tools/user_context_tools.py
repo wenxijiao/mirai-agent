@@ -26,6 +26,9 @@ def _normalize_kind(kind: str | None) -> str:
 def remember_user_context(content: str, kind: str = _DEFAULT_KIND, importance: float = 0.85) -> str:
     """Save a durable user context memory.
 
+    Personal tastes and dietary restrictions use profile (About you). Behavior
+    kinds describe Yumi's response style and workflow, not the user's tastes.
+
     Use this only when the user explicitly asks Yumi to remember something, or
     when the user directly confirms that a suggested memory should be saved.
     Do not save secrets, passwords, payment details, or sensitive personal data

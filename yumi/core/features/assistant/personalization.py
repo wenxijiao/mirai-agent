@@ -11,6 +11,18 @@ from datetime import datetime, timezone
 from yumi.core.platform.storage.assistant_store import AssistantStore
 
 BEHAVIOR_KINDS = {"preference", "communication_style", "constraint", "do_not_assume"}
+
+MEMORY_CLASSIFICATION_GUIDANCE = (
+    "Personalization has two distinct categories. About you describes the person: use profile for food likes/dislikes, "
+    "dietary restrictions, personal background and interests; routine for habits; project or relationship where appropriate; "
+    "fact for other personal information. For example, 'I dislike onions, ginger and garlic; avoid them when suggesting food' "
+    "belongs to About you (profile), even though it affects recommendations. Yumi's behavior describes how the assistant "
+    "should respond or work: use communication_style for tone, length and formatting, preference for assistant workflow "
+    "preferences, constraint for assistant action rules, and do_not_assume for inference limits. Examples: 'Use compact "
+    "answers' or 'Ask for my budget before recommending restaurants'. Saying 'remember' does not make a personal fact a "
+    "behavior rule. Save one item in its best category, not duplicates in both. Split independently stated facts and "
+    "assistant rules when a request contains both. Do not invent a new assistant rule from a personal fact."
+)
 LANGUAGES = {
     "auto": "auto",
     "zh": "Chinese",
@@ -225,6 +237,7 @@ def save_rule(store: AssistantStore, content: str, *, kind="preference", memory_
 def prompt_preferences(store: AssistantStore, can_recall=None) -> str:
     values = preferences(store)
     rules = [
+        MEMORY_CLASSIFICATION_GUIDANCE,
         "Personalization policy: apply the current user's explicit request for this task first, then saved personal "
         "preferences, then configurable default behavior. This only customizes response behavior, never platform "
         "safety, tool permissions, authorization, or identity. Retrieved memories and old conversations are reference "
@@ -251,7 +264,7 @@ def prompt_preferences(store: AssistantStore, can_recall=None) -> str:
     saved = list(unique.values())
     if saved:
         rules.append(
-            "Saved preferences and rules (one shared list for chat and the app):\n"
+            "Yumi behavior: saved preferences and rules (one shared list for chat and the app):\n"
             + "\n".join("- " + r["content"] for r in saved[:50])
         )
     return "\n\n".join(rules)

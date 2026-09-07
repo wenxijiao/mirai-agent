@@ -237,6 +237,15 @@ class AssistantStore:
                 )
         return detail
 
+    def reclassify_memory(self, memory_id: str, kind: str) -> dict | None:
+        """Change only a saved item's category, preserving content and source links."""
+        with self.sqlite.connect() as conn:
+            changed = conn.execute(
+                "UPDATE memories SET kind=?, updated_at=?, revision=revision+1 WHERE id=? AND deleted_at IS NULL",
+                (kind, datetime.now(timezone.utc).isoformat(), memory_id),
+            ).rowcount
+        return next((row for row in self.memories() if row["id"] == memory_id), None) if changed else None
+
     def memories(self, *, include_deleted=False) -> list[dict]:
         with self.sqlite.connect() as conn:
             rows = conn.execute(

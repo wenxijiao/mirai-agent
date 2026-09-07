@@ -131,3 +131,64 @@ def test_rule_api_edits_preserve_id_and_reject_blank_or_missing_sources(tmp_path
         assert len(client.get("/assistant/memories").json()["memories"]) == 1
         assert client.delete(path).status_code == 200
         assert client.get("/assistant/memories").json()["memories"] == []
+
+
+def test_category_change_preserves_id_sources_and_recall(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from yumi.core.features.assistant import router
+    from yumi.core.platform.http.dependencies import current_identity_dependency
+    from yumi.core.platform.plugins import Identity
+
+    memory = Memory(session_id="personal_food", storage_dir=str(tmp_path / "memory"))
+    store = AssistantStore(memory.sqlite, "alice")
+    memory.sqlite.upsert_event_from_message(
+        {
+            "id": "food-source",
+            "role": "user",
+            "session_id": "personal_food",
+            "content": "Remember my food dislikes: AVOIDS_SHALLOTS.",
+        }
+    )
+    row = save_rule(store, "AVOIDS_SHALLOTS", source_ids=["food-source"])["memory"]
+    monkeypatch.setattr(router, "_store", lambda _: store)
+    monkeypatch.setattr(router, "get_memory_factory", lambda: SimpleNamespace(get_for_identity=lambda _: memory))
+    app = FastAPI()
+    app.include_router(router.router)
+    app.dependency_overrides[current_identity_dependency] = lambda: Identity(user_id="alice")
+    with TestClient(app) as client:
+        result = client.put(f"/assistant/memories/{row['id']}", json={"kind": "profile", "content": row["content"]})
+        assert result.status_code == 200
+        saved = result.json()["memory"]
+        assert saved["id"] == row["id"]
+        assert saved["source_message_ids"] == ["food-source"]
+        assert saved["kind"] == "profile"
+        assert saved["created_at"] == row["created_at"]
+        assert memory.can_recall(saved)
+        assert len(store.memories(include_deleted=True)) == 1
+        assert "AVOIDS_SHALLOTS" not in prompt_preferences(store)
+        assert "AVOIDS_SHALLOTS" in str(memory.get_context(query="Suggest dinner"))
+        # Returning it to behavior changes which prompt section contains it, without tombstones.
+        returned = client.put(
+            f"/assistant/memories/{row['id']}", json={"kind": "preference", "content": row["content"]}
+        )
+        assert returned.json()["memory"]["id"] == row["id"]
+        assert "AVOIDS_SHALLOTS" in prompt_preferences(store)
+        assert client.put("/assistant/memories/missing", json={"kind": "profile", "content": "x"}).status_code == 404
+
+
+def test_personal_taste_and_behavior_tools_land_in_separate_prompt_sections(tmp_path, monkeypatch):
+    memory = Memory(session_id="personal_test", storage_dir=str(tmp_path / "memory"))
+    monkeypatch.setattr(user_context_tools, "_memory_store", lambda: memory)
+    monkeypatch.setattr(user_context_tools, "get_chat_owner_user_id", lambda: "alice")
+    user_context_tools.remember_user_context("AVOIDS_SHALLOTS", kind="profile")
+    user_context_tools.remember_user_context("Use exactly three bullet points.", kind="communication_style")
+    store = AssistantStore(memory.sqlite, "alice")
+    assert {r["kind"] for r in store.memories()} == {"profile", "communication_style"}
+    rules = prompt_preferences(store)
+    assert "AVOIDS_SHALLOTS" not in rules
+    assert "Use exactly three bullet points." in rules
+    context = str(memory.get_context(query="Help choose dinner"))
+    assert "AVOIDS_SHALLOTS" in context
