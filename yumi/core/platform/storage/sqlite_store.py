@@ -140,6 +140,9 @@ class SQLiteStore:
                 return
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with self.connect() as conn:
+                # API and channel workers can start together against one volume.
+                # Serialize the column check and ALTER across processes as well.
+                conn.execute("BEGIN IMMEDIATE")
                 for statement in _SCHEMA_SQL:
                     conn.execute(statement)
                 columns = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}

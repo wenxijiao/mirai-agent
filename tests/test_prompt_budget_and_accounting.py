@@ -2,6 +2,8 @@
 
 import asyncio
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -11,6 +13,26 @@ from yumi.core.platform.providers.budget import fit_prompt, fit_tool_schemas, to
 from yumi.core.platform.runtime.assistant_context import conversation_session
 from yumi.core.platform.storage.sqlite_store import SQLiteStore
 from yumi.core.platform.tools import routing
+
+
+def test_concurrent_workers_can_upgrade_existing_usage_database(tmp_path):
+    path = tmp_path / "yumi.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE token_usage(id TEXT PRIMARY KEY, session_id TEXT, turn_id TEXT, owner_user_id TEXT, provider TEXT, model TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER, created_at TEXT, created_at_num INTEGER)"
+        )
+    script = "from yumi.core.platform.storage.sqlite_store import SQLiteStore; import sys; SQLiteStore(sys.argv[1])"
+    workers = [
+        subprocess.Popen([sys.executable, "-c", script, str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for _ in range(4)
+    ]
+    for worker in workers:
+        _, error = worker.communicate(timeout=30)
+        assert worker.returncode == 0, error.decode()
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(token_usage)")}
+        assert {"usage_kind", "estimated"} <= columns
 
 
 def schema(name, description=""):
@@ -146,6 +168,7 @@ def test_auxiliary_usage_migration_totals_and_owner_isolation(tmp_path, monkeypa
 
     path = tmp_path / "yumi.db"
     with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(
             "CREATE TABLE token_usage(id TEXT PRIMARY KEY, session_id TEXT, turn_id TEXT, owner_user_id TEXT, provider TEXT, model TEXT, prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER, created_at TEXT, created_at_num INTEGER)"
         )
