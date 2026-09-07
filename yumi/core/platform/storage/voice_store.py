@@ -133,6 +133,8 @@ class VoiceStore:
             for i, (raw, fmt) in enumerate(audio_parts):
                 if fmt not in ("wav", "mp3", "ogg"):
                     raise HTTPException(503, "Unsupported speech audio format.")
+                if fmt == "wav":
+                    raw = finalize_wav(raw)
                 path = self.root / f"{voice_id}-{i}.{fmt}"
                 path.write_bytes(raw)
                 path.chmod(0o600)
@@ -209,3 +211,20 @@ def wav_duration(raw: bytes, *, required=False):
         if required:
             raise HTTPException(422, "A valid PCM WAV recording is required.") from None
         return None
+
+
+def finalize_wav(raw: bytes) -> bytes:
+    """Give streaming speech a finalized WAV header for native file playback."""
+    try:
+        with wave.open(io.BytesIO(raw), "rb") as source:
+            params = source.getparams()
+            frames = source.readframes(source.getnframes())
+            if len(frames) == source.getnframes() * source.getnchannels() * source.getsampwidth():
+                return raw
+        output = io.BytesIO()
+        with wave.open(output, "wb") as destination:
+            destination.setparams(params._replace(nframes=0))
+            destination.writeframes(frames)
+        return output.getvalue()
+    except (wave.Error, EOFError):
+        return raw

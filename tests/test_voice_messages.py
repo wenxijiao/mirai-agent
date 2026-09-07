@@ -261,4 +261,8 @@ def test_streaming_tts_wav_uses_actual_sample_duration(store):
     assert wav_duration(bytes(streaming)) == 1200
     row = ready(store)
     event = save_turn(store, row)
-    assert store.save_reply(event, [(bytes(streaming), "wav")])["duration_ms"] == 1200
+    saved = store.save_reply(event, [(bytes(streaming), "wav")])
+    assert saved["duration_ms"] == 1200
+    persisted = store.audio(saved["id"], 0)[0].read_bytes()
+    assert wav_duration(persisted, required=True) == 1200
+    assert persisted[44:] == bytes(streaming)[44:]
