@@ -54,3 +54,45 @@ def test_context_manager_swallows_record_failures(monkeypatch):
     rec = UsageRecorder(_ctx())
     with rec:
         pass  # should not raise
+
+
+def test_account_usage_reads_the_recorder_ledger_without_other_or_unowned_rows(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from yumi.core.features.assistant import router as assistant
+    from yumi.core.features.memory import store as memory_store
+    from yumi.core.platform.http.dependencies import current_identity_dependency
+    from yumi.core.platform.plugins import Identity
+    from yumi.core.platform.storage.sqlite_store import SQLiteStore
+
+    ledger = SQLiteStore(tmp_path / "global.db")
+    private = SQLiteStore(tmp_path / "account.db")
+    monkeypatch.setattr(memory_store, "get_memory_store", lambda: SimpleNamespace(sqlite=ledger))
+    monkeypatch.setattr(
+        assistant,
+        "get_memory_factory",
+        lambda: SimpleNamespace(get_for_identity=lambda _: SimpleNamespace(sqlite=private)),
+    )
+    for owner, tokens in [("alice", 13), ("bob", 700), ("", 1000), ("_local", 500)]:
+        recorder = UsageRecorder(TurnContext(prompt="test", session_id=f"u_{owner}__personal_1"), owner_uid=owner)
+        with recorder:
+            recorder.add({"prompt_tokens": tokens - 1, "completion_tokens": 1, "model": "test"})
+
+    app = FastAPI()
+    app.include_router(assistant.router)
+    app.dependency_overrides[current_identity_dependency] = lambda: Identity(user_id="alice")
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    with TestClient(app) as client:
+        for params in ({"days": 31}, {"month": month, "timezone": "UTC"}):
+            result = client.get("/assistant/usage", params=params)
+            assert result.status_code == 200
+            body = result.json()
+            assert body["total_tokens"] == 13
+            assert len(body["recent"]) == 1
+            assert body["recent"][0]["owner_user_id"] == "alice"
+        app.dependency_overrides[current_identity_dependency] = lambda: Identity(user_id="_local")
+        assert client.get("/assistant/usage").json()["total_tokens"] == 1500
+        assert client.get("/assistant/usage", params={"month": month}).json()["total_tokens"] == 1500

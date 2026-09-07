@@ -11,6 +11,7 @@ import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from yumi.core.platform.plugins.identity import SINGLE_USER_ID
 from yumi.core.platform.storage.sqlite_store import SQLiteStore, _event_row_to_message
 
 
@@ -258,8 +259,8 @@ class AssistantStore:
         with self.sqlite.connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM token_usage WHERE created_at_num>=?
-                AND (owner_user_id=? OR owner_user_id='') ORDER BY created_at_num DESC""",
-                (int(start.timestamp() * 1000), self.owner),
+                AND (owner_user_id=? OR (owner_user_id='' AND ?)) ORDER BY created_at_num DESC""",
+                (int(start.timestamp() * 1000), self.owner, self.owner in ("", SINGLE_USER_ID)),
             ).fetchall()
         totals = {k: sum(r[k] for r in rows) for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
         daily = {}
@@ -284,8 +285,13 @@ class AssistantStore:
         with self.sqlite.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM token_usage WHERE created_at_num >= ? AND created_at_num < ? "
-                "AND (owner_user_id=? OR owner_user_id='') ORDER BY created_at_num DESC",
-                (int(start.timestamp() * 1000), int(end.timestamp() * 1000), self.owner),
+                "AND (owner_user_id=? OR (owner_user_id='' AND ?)) ORDER BY created_at_num DESC",
+                (
+                    int(start.timestamp() * 1000),
+                    int(end.timestamp() * 1000),
+                    self.owner,
+                    self.owner in ("", SINGLE_USER_ID),
+                ),
             ).fetchall()
         keys = ("prompt_tokens", "completion_tokens", "total_tokens")
         totals = {key: 0 for key in keys}

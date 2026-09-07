@@ -262,12 +262,17 @@ async def usage(
     month: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
     timezone: str = Query("UTC", max_length=80),
 ):
+    from yumi.core.features.memory.store import get_memory_store
+
+    # UsageRecorder writes a shared ledger even with separate account stores.
+    # Read that same ledger with owner filtering, not the per-user transcript DB.
+    ledger = AssistantStore(get_memory_store().sqlite, identity.user_id)
     if month:
         try:
-            return _store(identity).monthly_usage(month, timezone)
+            return ledger.monthly_usage(month, timezone)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-    return _store(identity).usage(days)
+    return ledger.usage(days)
 
 
 def visible_tools(identity) -> dict:
