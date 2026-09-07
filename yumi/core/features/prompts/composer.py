@@ -16,6 +16,8 @@ from yumi.core.features.prompts.catalog import (
     build_tool_use_instruction,
 )
 from yumi.core.platform.runtime.assistant_context import PromptSnapshot
+from yumi.core.platform.runtime.caller_context import get_chat_owner_user_id
+from yumi.core.platform.storage.upload_paths import resolve_owned_image
 from yumi.core.platform.timezone import format_user_facing_time
 
 if TYPE_CHECKING:
@@ -110,11 +112,7 @@ def _inline_uploaded_images(messages: list[dict], *, vision_supported: bool = Tr
         total_bytes = 0
         for path_str in image_paths:
             try:
-                p = Path(path_str).expanduser().resolve()
-                if not p.is_relative_to(uploads_root):
-                    continue
-                if not p.exists() or not p.is_file():
-                    continue
+                p = resolve_owned_image(path_str, get_chat_owner_user_id(), root=uploads_root)
                 size = p.stat().st_size
                 if size > _MAX_INLINE_IMAGE_BYTES:
                     continue

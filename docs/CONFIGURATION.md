@@ -122,6 +122,7 @@ Every completed chat turn is stored automatically in SQLite alongside conversati
 |---|---|
 | `YUMI_CHAT_PROVIDER` | Override chat provider (`ollama`, `openai`, `gemini`, `claude`, `deepseek`, `grok`) |
 | `YUMI_CHAT_MODEL` | Override chat model |
+| `YUMI_CHAT_VISION_MODEL` | Optional image-capable model from the same chat provider; used for every request whose retained context includes images. Text-only context uses `YUMI_CHAT_MODEL`. A configured vision model failure is surfaced rather than silently removing the image. |
 | `YUMI_EMBEDDING_PROVIDER` | Override embedding provider |
 | `YUMI_EMBED_MODEL` | Override embedding model |
 | `OPENAI_API_KEY` | OpenAI-compatible API key |

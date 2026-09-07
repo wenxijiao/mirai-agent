@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 class ModelConfig(BaseModel):
     chat_provider: str = "ollama"
     chat_model: str | None = None
+    # Optional image-capable model from the same provider, used for image context.
+    chat_vision_model: str | None = None
     embedding_provider: str = "ollama"
     embedding_model: str | None = None
     embedding_dim: int | None = None

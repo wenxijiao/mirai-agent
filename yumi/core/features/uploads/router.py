@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
-from yumi.core.features.uploads.service import decode_upload_payload, save_uploaded_file
+from fastapi.responses import FileResponse
+from yumi.core.features.uploads.service import decode_upload_payload, owned_image_path, save_uploaded_file
 from yumi.core.platform.http.dependencies import CurrentIdentity
 from yumi.core.platform.http.schemas import FileUploadRequest
 from yumi.core.platform.plugins import get_session_scope
@@ -21,3 +22,9 @@ async def uploads_endpoint(identity: CurrentIdentity, request: FileUploadRequest
         raw,
         owner_user_id=identity.user_id if identity.user_id != "_local" else None,
     )
+
+
+@router.get("/uploads/content")
+async def uploaded_image_endpoint(identity: CurrentIdentity, path: str):
+    image = owned_image_path(path, identity.user_id)
+    return FileResponse(image, headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from yumi.core.platform.storage.sqlite_store import SQLiteStore, db_path_for_config_path
+from yumi.core.platform.storage.upload_paths import resolve_owned_image
 
 # Keep in sync with ``yumi.tools.file_tools`` supported types users typically upload.
 _ALLOWED_EXTENSIONS = frozenset(
@@ -68,6 +69,13 @@ def uploads_root() -> Path:
     root = Path.home() / ".yumi" / "uploads"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def owned_image_path(path: str, owner_user_id: str) -> Path:
+    try:
+        return resolve_owned_image(path, owner_user_id, root=uploads_root())
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Image not found.") from exc
 
 
 def _safe_session_dir(session_id: str) -> str:

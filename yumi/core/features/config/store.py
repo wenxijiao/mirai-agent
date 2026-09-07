@@ -57,6 +57,9 @@ def load_model_config() -> ModelConfig:
         config.chat_provider = chat_provider.strip()
     if chat_model:
         config.chat_model = chat_model.strip()
+    vision_model = os.getenv("YUMI_CHAT_VISION_MODEL")
+    if vision_model is not None:
+        config.chat_vision_model = vision_model.strip() or None
     if embedding_provider:
         config.embedding_provider = embedding_provider.strip()
     if embedding_model:

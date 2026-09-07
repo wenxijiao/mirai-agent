@@ -99,13 +99,15 @@ class YumiBot:
                 (i for i, m in enumerate(prompt_snapshot.messages) if m.get("role") == "user"), default=None
             )
         messages = fit_prompt(messages, tools, budget=cfg.chat_input_token_budget, current_user_index=current_index)
+        has_images = messages_have_multimodal_images(messages)
+        model = cfg.chat_vision_model if has_images and cfg.chat_vision_model else self.model_name
         if prompt:
             user_message_id = memory.add_message("user", prompt, turn_id=turn_id)
 
         turn_inspector.record_llm_request(
             session_id,
             provider=provider_name(self.provider),
-            model=self.model_name,
+            model=model,
             messages=messages,
             tools=tools,
         )
@@ -119,7 +121,7 @@ class YumiBot:
             path = write_provider_failure_diagnostic(
                 exc=exc,
                 provider=provider_name(self.provider),
-                model=self.model_name,
+                model=model,
                 messages=normalize_tool_history(msgs),
                 tools=tools,
                 session_id=session_id,
@@ -132,7 +134,7 @@ class YumiBot:
         async def _consume_stream(msgs: list[dict]):
             nonlocal full_response, full_thought, parser
             async for chunk in self.provider.chat_stream(
-                model=self.model_name,
+                model=model,
                 messages=normalize_tool_history(msgs),
                 tools=tools,
                 think=use_think,
@@ -187,7 +189,7 @@ class YumiBot:
             async for chunk in _consume_stream(messages):
                 yield chunk
         except Exception as exc:
-            if is_multimodal_vision_rejection(exc) and messages_have_multimodal_images(messages):
+            if is_multimodal_vision_rejection(exc) and has_images and not cfg.chat_vision_model:
                 logger.info(
                     "Multimodal request rejected; retrying chat as text-only: %s",
                     exc,
@@ -211,7 +213,7 @@ class YumiBot:
                 turn_inspector.record_llm_request(
                     session_id,
                     provider=provider_name(self.provider),
-                    model=self.model_name,
+                    model=model,
                     messages=messages_fb,
                     tools=tools,
                     note="text_only_fallback_after_vision_rejection",

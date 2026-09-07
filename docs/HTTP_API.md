@@ -186,3 +186,7 @@ Run `yumi --server` locally first, and complete `yumi --setup` (or set model-rel
 ## Stability notes
 
 Yumi is still in the **0.x** stage. For HTTP integrations, treat the documented routes in this file and the generated OpenAPI schema as the intended public contract. Internal Python modules and undocumented routes may change between releases.
+
+### Reopen an uploaded image
+
+`GET /uploads/content?path=<URL-encoded path returned by POST /uploads>` returns the original image bytes. It requires the same identity as the upload owner; unavailable, non-image, outside-root, and other users' paths return 404. Responses use `Cache-Control: private, no-store`. The app preserves the raw upload envelope for model context while showing only the original caption and private image thumbnails in chat and history.
