@@ -74,6 +74,17 @@ class ToolConfirmationEvent(BaseModel):
     tool_name: str
     full_tool_name: str
     arguments: dict
+    action_summary: str | None = None
+    edge_name: str | None = None
+
+
+class TurnTimingEvent(BaseModel):
+    model_config = _BaseConfig
+    type: Literal["turn_timing"] = "turn_timing"
+    turn_id: str
+    duration_ms: int
+    confirmation_wait_ms: int = 0
+    first_response_ms: int | None = None
 
 
 class ErrorEvent(BaseModel):
@@ -96,6 +107,7 @@ ChatEvent = Annotated[
         ToolStatusEvent,
         ToolConfirmationEvent,
         ErrorEvent,
+        TurnTimingEvent,
     ],
     Field(discriminator="type"),
 ]

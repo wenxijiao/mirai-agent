@@ -146,9 +146,28 @@ async def context_prefetch_items() -> list[ContextPrefetchItem]:
     covered by its fixed ``proactive_context_args`` is skipped. Failures are
     swallowed: context is best-effort and must never break a turn.
     """
+    from yumi.core.platform.plugins import get_current_identity, get_edge_scope
+    from yumi.core.platform.runtime.assistant_context import conversation_session, personal_store
+    from yumi.core.platform.storage.assistant_store import is_personal_session
+
+    identity = get_current_identity()
+    own = personal_store(identity.user_id).get("tools", {}) if is_personal_session(conversation_session.get()) else {}
+    skipped = {
+        name
+        for name, rules in own.items()
+        if rules.get("disabled") or rules.get("require_confirmation") or rules.get("ai_access") in {"none", "ask"}
+    }
+    visible = {
+        s["function"]["name"] for s in get_edge_scope().filter_edge_tool_schemas(identity, EDGE_TOOLS_REGISTRY, skipped)
+    }
     items: list[ContextPrefetchItem] = []
     for name, tool_data in TOOL_REGISTRY.items():
-        if name in DISABLED_TOOLS or name in CONFIRMATION_TOOLS or not tool_data.get("proactive_context"):
+        if (
+            name in skipped
+            or name in DISABLED_TOOLS
+            or name in CONFIRMATION_TOOLS
+            or not tool_data.get("proactive_context")
+        ):
             continue
         args = tool_data.get("proactive_context_args") or {}
         schema = tool_data["schema"]
@@ -171,7 +190,9 @@ async def context_prefetch_items() -> list[ContextPrefetchItem]:
     for edge_key, edge_tools in EDGE_TOOLS_REGISTRY.items():
         for full_name, entry in edge_tools.items():
             if (
-                full_name in DISABLED_TOOLS
+                full_name not in visible
+                or full_name in skipped
+                or full_name in DISABLED_TOOLS
                 or full_name in CONFIRMATION_TOOLS
                 or entry.get("require_confirmation")
                 or not entry.get("proactive_context")

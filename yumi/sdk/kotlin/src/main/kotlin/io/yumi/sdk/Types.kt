@@ -45,6 +45,7 @@ data class RegisterOptions(
     val proactiveContext: Boolean = false,
     val proactiveContextArgs: JsonObject? = null,
     val proactiveContextDescription: String? = null,
+    val confirmationTemplate: String? = null,
     val handler: ToolHandler,
 )
 

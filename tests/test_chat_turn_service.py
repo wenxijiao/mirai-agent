@@ -111,7 +111,9 @@ def test_normal_provider_finish_is_internal(runtime, install_fakes):
 
     events = asyncio.run(_drain(ChatTurnService(runtime).stream_chat_turn("hi", "s_finish_stop")))
 
-    assert [event.type for event in events] == ["text"]
+    assert [event.type for event in events] == ["text", "turn_timing"]
+    assert events[-1].duration_ms >= 0
+    assert events[-1].confirmation_wait_ms == 0
 
 
 @pytest.mark.parametrize(
@@ -309,4 +311,6 @@ def test_turn_language_note_injected_from_latest_prompt(runtime, install_fakes):
     eph = captured.get("ephemeral") or []
     joined = "\n".join(m.get("content", "") for m in eph if isinstance(m, dict))
     assert "[Turn language]" in joined
-    assert "latest user message appears to be in Japanese" in joined
+    assert "suggests Japanese" in joined
+    assert "most natural" in joined
+    assert "MUST be in Japanese" not in joined

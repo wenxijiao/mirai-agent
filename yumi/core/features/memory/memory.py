@@ -401,6 +401,9 @@ class Memory:
     def delete_message(self, message_id: str) -> bool:
         # SQLite is authoritative; the LanceDB index is a derived best-effort mirror.
         deleted = self.sqlite.delete_message(message_id)
+        for item in self.list_long_term_memories(limit=10000):
+            if message_id in item.get("source_message_ids", []):
+                self.delete_long_term_memory(item["id"])
         if not _rebuild_active_for(self.db_dir):
             try:
                 self.messages.delete(message_id)
@@ -446,6 +449,9 @@ class Memory:
             message = self.sqlite.get_message(message_id)
             if message is not None:
                 return message
+            with self.sqlite.connect() as conn:
+                if conn.execute("SELECT 1 FROM events WHERE id=?", (message_id,)).fetchone():
+                    return None
         except Exception as exc:
             logger.debug("SQLite get_message skipped: %s", exc)
         return self.messages.get(message_id)
@@ -570,10 +576,26 @@ class Memory:
     def build_related_memory_message(self, query: str, exclude_session_id: str | None = None, limit: int = 5):
         if not query or not query.strip():
             return None
-        related = self.search_messages(query=query, session_id=None, limit=limit)
+        from yumi.core.platform.storage.assistant_store import is_group_session, meaningful_recall_query
+
+        if not meaningful_recall_query(query):
+            return None
+        related = self.search_messages(
+            query=query, session_id=None, limit=max(limit * 4, 20), include_deleted_sessions=False
+        )
         seen: set[tuple] = set()
         lines = [RELATED_MEMORY_HEADER]
         for item in related:
+            canonical = self.sqlite.get_message(item.get("id", ""))
+            if canonical is None or is_group_session(canonical["session_id"]) or not self.can_recall(canonical):
+                continue
+            from yumi.core.features.memory.retrieval import keyword_score, semantic_score
+
+            if keyword_score(query, canonical["content"]) <= 0 and semantic_score(item) < 0.55:
+                continue
+            item = canonical
+            if len(lines) > limit:
+                break
             if exclude_session_id and item["session_id"] == exclude_session_id:
                 continue
             normalized_content = " ".join(item["content"].split())
@@ -583,7 +605,7 @@ class Memory:
             seen.add(dedupe_key)
             lines.append(
                 RELATED_MEMORY_ITEM_TEMPLATE.format(
-                    session_id=item["session_id"],
+                    session_id=f"{item['session_id']} / message:{item['id']}",
                     role=item["role"],
                     timestamp=item["timestamp"],
                     content=normalized_content[:240],
@@ -664,16 +686,73 @@ class Memory:
         return memory
 
     def list_long_term_memories(self, kind: str | None = None, session_id: str | None = None, limit: int = 50):
-        return self.long_term.list(kind=kind, session_id=session_id, limit=limit)
+        # Import pre-upgrade memories only when the id has never existed in the
+        # canonical store. A stale vector row must never resurrect a tombstone.
+        with self.sqlite.connect() as conn:
+            known = {r[0] for r in conn.execute("SELECT id FROM memories")}
+        for row in self.long_term.list(limit=10000):
+            if row["id"] not in known:
+                self.sqlite.upsert_memory(row)
+        from yumi.core.platform.storage.assistant_store import AssistantStore
+
+        rows = AssistantStore(self.sqlite, "").memories()
+        return [
+            r for r in rows if (not kind or r["kind"] == kind) and (session_id is None or r["session_id"] == session_id)
+        ][:limit]
 
     def delete_long_term_memory(self, memory_id: str) -> bool:
-        deleted = self.long_term.delete(memory_id)
-        if deleted:
-            try:
-                self.sqlite.delete_memory(memory_id)
-            except Exception as exc:
-                logger.debug("SQLite long-term memory delete skipped: %s", exc)
+        self.list_long_term_memories(limit=1)  # migrate legacy rows before deletion
+        deleted = self.sqlite.delete_memory(memory_id)
+        try:
+            self.long_term.delete(memory_id)
+        except Exception as exc:
+            logger.warning("Derived memory index deletion failed: %s", exc)
         return deleted
+
+    def recall_redactions(self) -> tuple[set[str], list[str]]:
+        import json
+
+        with self.sqlite.connect() as conn:
+            memories = conn.execute(
+                "SELECT source_event_ids_json, content FROM memories WHERE deleted_at IS NOT NULL"
+            ).fetchall()
+            events = conn.execute("SELECT id FROM events WHERE deleted_at IS NOT NULL").fetchall()
+        ids = {r[0] for r in events}
+        phrases = []
+        for row in memories:
+            ids.update(json.loads(row[0]))
+            if row[1].strip():
+                phrases.append(row[1].strip().lower())
+        if ids:
+            with self.sqlite.connect() as conn:
+                # Forget the prompt contribution of the entire originating turn,
+                # including assistant paraphrases and persisted tool results.
+                placeholders = ",".join("?" for _ in ids)
+                turns = [
+                    r[0]
+                    for r in conn.execute(
+                        f"SELECT DISTINCT turn_id FROM events WHERE id IN ({placeholders}) AND turn_id != ''", list(ids)
+                    )
+                ]
+                if turns:
+                    placeholders = ",".join("?" for _ in turns)
+                    ids.update(
+                        r[0] for r in conn.execute(f"SELECT id FROM events WHERE turn_id IN ({placeholders})", turns)
+                    )
+        return ids, phrases
+
+    def can_recall(self, row: dict) -> bool:
+        ids, phrases = self.recall_redactions()
+        content = str(row.get("content") or "").lower()
+        if row.get("kind") and row.get("session_id") == "__stable_user_context__" and row.get("deleted_at") is None:
+            # A later explicit save can restore a preference. Its old transcript
+            # sources remain redacted; the new saved value is authoritative.
+            return not ids.intersection(row.get("source_message_ids") or [])
+        return (
+            row.get("id") not in ids
+            and not ids.intersection(row.get("source_message_ids") or [])
+            and not any(p in content for p in phrases)
+        )
 
     def create_tool_observation(
         self,
@@ -711,8 +790,33 @@ class Memory:
     def list_tool_observations(self, session_id: str | None = None, limit: int = 50):
         return self.tool_observations.list(session_id=session_id, limit=limit)
 
+    def redaction_stamp(self) -> str:
+        import hashlib
+        import json
+
+        ids, phrases = self.recall_redactions()
+        if not ids and not phrases:
+            return ""
+        return hashlib.sha256(json.dumps([sorted(ids), sorted(phrases)]).encode()).hexdigest()
+
+    def mark_summary_safe(self, session_id: str, summary: str, stamp: str) -> None:
+        from yumi.core.platform.storage.assistant_store import AssistantStore
+
+        AssistantStore(self.sqlite, "").put(
+            "summary_validation:" + session_id, {"stamp": stamp, "summary": " ".join(summary.split())}
+        )
+
     def get_session_summary(self, session_id: str | None = None):
-        return self.summaries.get(session_id=session_id)
+        from yumi.core.platform.storage.assistant_store import AssistantStore
+
+        sid = session_id or self.session_id
+        row = self.summaries.get(session_id=sid)
+        stamp = self.redaction_stamp()
+        if stamp and row:
+            validation = AssistantStore(self.sqlite, "").get("summary_validation:" + sid, {})
+            if validation != {"stamp": stamp, "summary": row.get("summary", "")}:
+                return None
+        return row
 
     def update_session_summary(
         self,
@@ -732,7 +836,16 @@ class Memory:
     # ── prompt accessor ────────────────────────────────────────────────────
 
     def _current_system_prompt(self) -> str:
-        return get_effective_system_prompt(self.session_id)
+        from yumi.core.platform.plugins import get_session_scope
+        from yumi.core.platform.storage.assistant_store import AssistantStore, is_personal_session
+
+        prompt = get_effective_system_prompt(self.session_id)
+        if is_personal_session(self.session_id):
+            owner = get_session_scope().owner_user_from_session_id(self.session_id)
+            from yumi.core.features.assistant.personalization import prompt_preferences
+
+            prompt += "\n\n" + prompt_preferences(AssistantStore(self.sqlite, owner), self.can_recall)
+        return prompt
 
     def get_system_message(self) -> dict:
         return {"role": "system", "content": self._current_system_prompt()}

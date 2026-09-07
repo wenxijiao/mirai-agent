@@ -57,6 +57,7 @@ func buildToolSchema(
     parameters: [ToolParameter],
     timeout: Int? = nil,
     requireConfirmation: Bool = false,
+    confirmationTemplate: String? = nil,
     alwaysInclude: Bool = false,
     allowProactive: Bool = false,
     proactiveContext: Bool = false,
@@ -96,6 +97,7 @@ func buildToolSchema(
     if let timeout {
         schema["timeout"] = timeout
     }
+    if let confirmationTemplate { schema["confirmation_template"] = confirmationTemplate }
     if requireConfirmation {
         schema["require_confirmation"] = true
     }

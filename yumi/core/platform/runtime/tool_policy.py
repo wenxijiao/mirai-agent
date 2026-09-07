@@ -13,3 +13,4 @@ class ToolPolicy:
     confirmation_tools: set[str] = field(default_factory=set)
     always_allowed_tools: set[str] = field(default_factory=set)
     pending_confirmations: dict[str, object] = field(default_factory=dict)
+    confirmation_owners: dict[str, str] = field(default_factory=dict)

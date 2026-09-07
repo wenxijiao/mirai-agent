@@ -13,6 +13,7 @@ public class RegisterOptions {
     private String description;
     private List<ToolParameter> parameters = new ArrayList<>();
     private Integer timeout;
+    private String confirmationTemplate;
     private boolean requireConfirmation;
     /** Exposure mode — "dynamic" (default), "pinned", or "autorun". Input sugar mapped onto the flags below. */
     private String mode = "dynamic";
@@ -32,6 +33,8 @@ public class RegisterOptions {
     public RegisterOptions parameters(ToolParameter... params) { this.parameters = Arrays.asList(params); return this; }
     public RegisterOptions parameters(List<ToolParameter> params) { this.parameters = params; return this; }
     public RegisterOptions timeout(int seconds) { this.timeout = seconds; return this; }
+    public RegisterOptions confirmationTemplate(String template) { this.confirmationTemplate = template; return this; }
+    public String getConfirmationTemplate() { return confirmationTemplate; }
     public RegisterOptions requireConfirmation(boolean v) { this.requireConfirmation = v; return this; }
     public RegisterOptions mode(String v) { this.mode = v; return this; }
     public RegisterOptions contextArgs(Map<String, Object> v) { this.contextArgs = v; return this; }
@@ -94,6 +97,7 @@ public class RegisterOptions {
         r.parameters = parameters;
         r.timeout = timeout;
         r.requireConfirmation = requireConfirmation;
+        r.confirmationTemplate = confirmationTemplate;
         r.mode = mode;
         r.contextArgs = contextArgs;
         r.contextLabel = contextLabel;

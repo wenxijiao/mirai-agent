@@ -104,6 +104,10 @@ def _build_tool_schema(
             )
 
         param_schema = _annotation_to_schema(annotation)
+        if param.default is not inspect.Parameter.empty and isinstance(
+            param.default, (str, int, float, bool, list, dict, type(None))
+        ):
+            param_schema["default"] = param.default
         if params and param_name in params:
             param_schema["description"] = params[param_name]
         else:
@@ -141,6 +145,7 @@ def register_tool(
     proactive_context_args: Dict[str, Any] | None = None,
     proactive_context_description: str | None = None,
     default_require_confirmation: bool = False,
+    confirmation_template: str | dict[str, str] | None = None,
 ) -> None:
     """Register a plain function as a Yumi tool (non-decorator API).
 
@@ -165,6 +170,8 @@ def register_tool(
             startup unless the user has explicitly opted into ``local_tools_always_allow``. Use this
             for tools whose blast radius (filesystem reads, network mutations) warrants prompt
             injection defense by default.
+        confirmation_template: Optional user-facing action, e.g. "Check weather in {city}".
+            Supports only named parameter placeholders; a locale-to-template mapping is also accepted.
     """
     schema = _build_tool_schema(
         func,
@@ -178,6 +185,8 @@ def register_tool(
         proactive_context_description=proactive_context_description,
     )
     tool_name = schema["function"]["name"]
+    if confirmation_template:
+        schema["confirmation_template"] = confirmation_template
     if not is_valid_tool_name(tool_name):
         raise ValueError(
             f"Tool name {tool_name!r} is invalid: use only letters, digits, '_' or '-' "
@@ -191,6 +200,7 @@ def register_tool(
         "proactive_context_args": proactive_context_args,
         "proactive_context_description": proactive_context_description,
         "default_require_confirmation": default_require_confirmation,
+        "confirmation_template": confirmation_template,
     }
 
 

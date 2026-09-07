@@ -11,6 +11,8 @@ public sealed class RegisterOptions
     public string? Description { get; private set; }
     public List<ToolParameter> Parameters { get; private set; } = new();
     public int? Timeout { get; private set; }
+    public string? ConfirmationTemplate { get; private set; }
+    public RegisterOptions SetConfirmationTemplate(string template) { ConfirmationTemplate = template; return this; }
     public bool RequireConfirmation { get; private set; }
 
     /// <summary>

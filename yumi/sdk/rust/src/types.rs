@@ -73,6 +73,7 @@ pub struct RegisterOptions {
     pub description: String,
     pub parameters: Vec<ToolParameter>,
     pub timeout: Option<u32>,
+    pub confirmation_template: Option<String>,
     pub require_confirmation: bool,
     /// Exposure mode — `"dynamic"` (default), `"pinned"`, or `"autorun"`.
     /// Mapped onto the low-level flags below before the wire schema is built:
@@ -100,6 +101,7 @@ impl Default for RegisterOptions {
             description: String::new(),
             parameters: Vec::new(),
             timeout: None,
+            confirmation_template: None,
             require_confirmation: false,
             mode: "dynamic".to_string(),
             context_args: None,

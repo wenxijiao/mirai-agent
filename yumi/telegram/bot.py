@@ -207,12 +207,22 @@ class _TelegramChatHandler(BaseChannelHandler):
         return "".join(self.text_parts)
 
 
-async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> tuple[bool, str]:
+async def _post_clear_session(
+    connection: ConnectionConfig, session_id: str, *, personal: bool = True
+) -> tuple[bool, str]:
     url = _api_url(connection, f"/clear?session_id={session_id}")
     headers = connection.auth_headers()
     timeout = httpx.Timeout(10.0, read=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(url, headers=headers)
+        if personal:
+            state = await client.get(_api_url(connection, "/assistant"), headers=headers)
+            if state.status_code >= 400:
+                return False, state.text[:500]
+            r = await client.post(
+                _api_url(connection, "/assistant/reset"), headers=headers, json={"revision": state.json()["revision"]}
+            )
+        else:
+            r = await client.post(url, headers=headers)
         if r.status_code >= 400:
             return False, r.text[:500]
         return True, ""
@@ -386,9 +396,12 @@ def build_application():
         uid = update.effective_user.id
         session_id = _session_id_for_user(uid)
         connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
-        ok, err = await _post_clear_session(connection, session_id)
+        private = update.effective_chat.type == "private"
+        if not private:
+            session_id = f"group_tg_{update.effective_chat.id}_{uid}"
+        ok, err = await _post_clear_session(connection, session_id, personal=private)
         if ok:
-            await update.message.reply_text("Session cleared.")
+            await update.message.reply_text("Context restarted. Your history and saved memories are kept.")
         else:
             await update.message.reply_text(_truncate_for_telegram(f"Failed to clear: {err}"))
 
@@ -635,7 +648,8 @@ def build_application():
 
         chat_id = update.effective_chat.id
         user_id = update.effective_user.id
-        session_id = _session_id_for_user(user_id)
+        private = update.effective_chat.type == "private"
+        session_id = _session_id_for_user(user_id) if private else f"group_tg_{chat_id}_{user_id}"
         connection = chat_connection_config(update.effective_user.id if update.effective_user else None)
 
         parts: list[str] = []
@@ -665,7 +679,7 @@ def build_application():
         url = _chat_url(connection)
         headers = connection.auth_headers()
         headers["Content-Type"] = "application/json"
-        payload = {"prompt": prompt, "session_id": session_id}
+        payload = {"prompt": prompt, "session_id": session_id, "personal": private, "channel": "telegram"}
         timeout = httpx.Timeout(10.0, read=600.0)
 
         handler = _TelegramChatHandler(context=context, chat_id=chat_id, connection=connection)

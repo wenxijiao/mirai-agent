@@ -51,6 +51,9 @@ Map<String, dynamic> buildToolSchema(RegisterOptions opts) {
   if (opts.timeout != null) {
     schema['timeout'] = opts.timeout;
   }
+  if (opts.confirmationTemplate != null) {
+    schema['confirmation_template'] = opts.confirmationTemplate;
+  }
   if (opts.requireConfirmation) {
     schema['require_confirmation'] = true;
   }

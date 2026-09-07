@@ -9,6 +9,9 @@ class ChatRequest(BaseModel):
     prompt: str
     session_id: str = "default"
     think: bool = False
+    personal: bool = False
+    revision: int | None = Field(default=None, ge=1)
+    channel: str = Field(default="app", pattern="^(app|telegram|discord|line)$")
 
 
 class FileUploadRequest(BaseModel):

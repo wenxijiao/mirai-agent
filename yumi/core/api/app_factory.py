@@ -18,6 +18,7 @@ import yumi.core.platform.runtime.accessors as _state
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from yumi.core.chatbot import YumiBot
+from yumi.core.features.assistant.router import router as assistant_router
 from yumi.core.features.chat.router import router as chat_router
 from yumi.core.features.config import (
     embeddings_enabled,
@@ -200,6 +201,7 @@ async def lifespan(app: FastAPI):
 
 def _include_core_routers(app: FastAPI) -> None:
     app.include_router(edge_router)
+    app.include_router(assistant_router)
     app.include_router(chat_router)
     app.include_router(timers_router)
     app.include_router(uploads_router)

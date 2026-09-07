@@ -28,6 +28,9 @@ fun buildToolSchema(opts: RegisterOptions): JsonObject {
     if (opts.timeout != null) {
         schema.addProperty("timeout", opts.timeout)
     }
+    if (opts.confirmationTemplate != null) {
+        schema.addProperty("confirmation_template", opts.confirmationTemplate)
+    }
     if (opts.requireConfirmation) {
         schema.addProperty("require_confirmation", true)
     }

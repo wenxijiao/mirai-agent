@@ -65,6 +65,9 @@ func BuildToolSchema(opts RegisterOptions) map[string]interface{} {
 	if opts.Timeout != nil {
 		schema["timeout"] = *opts.Timeout
 	}
+	if opts.ConfirmationTemplate != "" {
+		schema["confirmation_template"] = opts.ConfirmationTemplate
+	}
 	if opts.RequireConfirmation {
 		schema["require_confirmation"] = true
 	}

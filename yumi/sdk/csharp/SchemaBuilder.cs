@@ -48,6 +48,9 @@ internal static class SchemaBuilder
         if (opts.Timeout.HasValue)
             schema["timeout"] = opts.Timeout.Value;
 
+        if (opts.ConfirmationTemplate != null)
+            schema["confirmation_template"] = opts.ConfirmationTemplate;
+
         if (opts.RequireConfirmation)
             schema["require_confirmation"] = true;
 

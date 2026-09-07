@@ -23,6 +23,7 @@ class ChatTraceSink:
     def __init__(self, ctx: TurnContext, *, bot: Any | None = None) -> None:
         self.ctx = ctx
         self.bot = bot
+        self.timing = None
 
     # ---- live event tracing -------------------------------------------------
 
@@ -51,6 +52,8 @@ class ChatTraceSink:
             timer_callback=self.ctx.timer_callback,
             prompt_metadata=prompt_catalog_metadata(),
             owner_user_id=self.ctx.owner_uid or "",
+            started_monotonic=self.ctx.request_started,
+            started_at=self.ctx.request_started_at,
         )
 
     def record_turn_end(
@@ -67,6 +70,14 @@ class ChatTraceSink:
             usage_model=usage_model,
             tool_loop_events=self.ctx.tool_loop_events,
         )
+        if detail is not None and detail.get("duration_ms") is not None:
+            from yumi.core.platform.http.events import TurnTimingEvent
+
+            self.timing = TurnTimingEvent(
+                turn_id=self.ctx.turn_id, duration_ms=detail["duration_ms"],
+                confirmation_wait_ms=detail.get("confirmation_wait_ms", 0),
+                first_response_ms=detail.get("first_response_ms"),
+            )
         if detail is None or self.bot is None:
             return
         try:

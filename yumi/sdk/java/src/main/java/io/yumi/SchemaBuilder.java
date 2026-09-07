@@ -41,6 +41,9 @@ public final class SchemaBuilder {
         if (opts.getTimeout() != null) {
             schema.addProperty("timeout", opts.getTimeout());
         }
+        if (opts.getConfirmationTemplate() != null) {
+            schema.addProperty("confirmation_template", opts.getConfirmationTemplate());
+        }
         if (opts.isRequireConfirmation()) {
             schema.addProperty("require_confirmation", true);
         }

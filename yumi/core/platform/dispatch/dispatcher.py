@@ -333,6 +333,10 @@ class ToolDispatcher:
             status=result.status,
             duration_ms=dt_ms,
             result_preview=str(result.result)[:500],
+            approval=inv.approval,
+            action_summary=inv.action_summary,
+            turn_id=ctx.turn_id,
+            tool_call_id=inv.tool_call_id,
         )
         # Opt-in persistent tool-call audit (off by default → no overhead unless set).
         # When YUMI_AUDIT_TOOL_CALLS is on, the active AuditSink records who called
@@ -360,6 +364,22 @@ class ToolDispatcher:
     async def _run_one(self, inv: ToolInvocation) -> ToolResult:
         if inv.kind == "local":
             return await self.local_executor.run(inv)
+        from yumi.core.platform.plugins import get_edge_scope, get_identity_provider
+
+        identity = get_identity_provider().current()
+        if getattr(identity, "source", None) == "internal" and inv.caller_user_id:
+            from dataclasses import replace
+
+            identity = replace(identity, user_id=inv.caller_user_id)
+
+        # Recheck after a potentially long user-confirmation wait. Account/edge
+        # access may have been revoked since this invocation was prepared.
+        schemas = get_edge_scope().filter_edge_tool_schemas(
+            identity, self.runtime.edge_registry.tools, set()
+        )
+        if not any(schema.get("function", {}).get("name") == inv.func_name for schema in schemas):
+            return ToolResult(func_name=inv.func_name, result="Error: Tool access is no longer available.",
+                              status="error", original_tool_name=inv.original_tool_name, target_edge=inv.target_edge)
         return await self.edge_executor.run(inv)
 
     # ---- helpers reused by orchestrator -------------------------------------

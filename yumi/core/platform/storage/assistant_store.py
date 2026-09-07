@@ -1,0 +1,333 @@
+"""Account-scoped personal assistant state, independent of the vector index.
+
+The active conversation pointer is a transactional compare-and-swap. Session ids
+remain opaque storage segments; resetting never deletes messages or memories.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import uuid
+from datetime import datetime, timedelta, timezone
+
+from yumi.core.platform.storage.sqlite_store import SQLiteStore, _event_row_to_message
+
+
+class StaleRevision(ValueError):
+    pass
+
+
+def is_personal_session(session_id: str) -> bool:
+    return session_id.split("__", 1)[-1].startswith("personal_")
+
+
+def is_group_session(session_id: str) -> bool:
+    return session_id.split("__", 1)[-1].startswith("group_")
+
+
+class AssistantStore:
+    def __init__(self, sqlite: SQLiteStore, owner: str):
+        self.sqlite = sqlite
+        self.owner = owner
+        self.namespace = f"assistant:{owner}"
+
+    def _read(self, conn, key, default):
+        row = conn.execute(
+            "SELECT value_json FROM settings WHERE namespace=? AND key=?", (self.namespace, key)
+        ).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def _write(self, conn, key, value):
+        conn.execute(
+            """INSERT INTO settings(namespace,key,value_json,updated_at) VALUES(?,?,?,?)
+            ON CONFLICT(namespace,key) DO UPDATE SET value_json=excluded.value_json,
+            updated_at=excluded.updated_at""",
+            (self.namespace, key, json.dumps(value), datetime.now(timezone.utc).isoformat()),
+        )
+
+    def get(self, key: str, default=None):
+        with self.sqlite.connect() as conn:
+            return self._read(conn, key, default)
+
+    def put(self, key: str, value):
+        with self.sqlite.connect() as conn:
+            self._write(conn, key, value)
+        return value
+
+    def current(self, qualify) -> dict:
+        with self.sqlite.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            state = self._read(conn, "state", None)
+            if state is None:
+                state = {
+                    "session_id": qualify(f"personal_{uuid.uuid4().hex}"),
+                    "revision": 1,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                }
+                self._write(conn, "state", state)
+            return state
+
+    def reset(self, expected_revision: int, qualify) -> dict:
+        with self.sqlite.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = self._read(conn, "state", None)
+            if not current or current["revision"] != expected_revision:
+                raise StaleRevision("Conversation changed on another device. Refresh and try again.")
+            state = {
+                "session_id": qualify(f"personal_{uuid.uuid4().hex}"),
+                "revision": current["revision"] + 1,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+            self._write(conn, "state", state)
+            return state
+
+    def snapshot(self, state: dict, *, limit: int = 100, before: int | None = None) -> dict:
+        clauses = ["e.deleted_at IS NULL", "e.session_id=?", "e.event_type IN ('user_message','assistant_message')"]
+        params = [state["session_id"]]
+        if before is not None:
+            clauses.append("e.seq < ?")
+            params.append(before)
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                f"SELECT e.* FROM events e WHERE {' AND '.join(clauses)} ORDER BY seq DESC LIMIT ?",
+                [*params, limit + 1],
+            ).fetchall()
+        messages = [_event_row_to_message(r) for r in reversed(rows[:limit])]
+        for message in messages:
+            if message["role"] == "assistant" and message["turn_id"]:
+                trace = self.sqlite.get_turn_trace(message["turn_id"]) or {}
+                if trace.get("session_id") == message["session_id"]:
+                    message["duration_ms"] = trace.get("duration_ms")
+                    message["confirmation_wait_ms"] = trace.get("confirmation_wait_ms")
+                results = [result for step in trace.get("rounds", []) for result in step.get("tool_results", [])]
+                message["tool_events"] = [
+                    {
+                        "status": result.get("status", "success"),
+                        "content": f"{result.get('tool', 'Tool')}: {str(result.get('result_preview') or result.get('result') or result.get('status', ''))[:800]}",
+                    }
+                    for result in results
+                ]
+        return {**state, "messages": messages, "has_more": len(rows) > limit}
+
+    def history(
+        self,
+        *,
+        prefix: str | None = None,
+        query: str = "",
+        channel: str = "",
+        before: int | None = None,
+        limit: int = 50,
+    ) -> dict:
+        clauses = [
+            "e.deleted_at IS NULL",
+            "COALESCE(s.status,'active') != 'deleted'",
+            "e.event_type IN ('user_message','assistant_message')",
+            "e.session_id NOT LIKE '%group\\_%' ESCAPE '\\'",
+        ]
+        params: list = []
+        if prefix:
+            clauses.append("substr(e.session_id,1,?)=?")
+            params.extend([len(prefix), prefix])
+        if query.strip():
+            clauses.append("instr(lower(e.content), lower(?)) > 0")
+            params.append(query.strip())
+        if channel:
+            clauses.append(
+                "COALESCE(json_extract(e.metadata_json,'$.channel'), CASE "
+                "WHEN e.session_id LIKE '%tg\\_%' ESCAPE '\\' THEN 'telegram' "
+                "WHEN e.session_id LIKE '%dc\\_%' ESCAPE '\\' THEN 'discord' "
+                "WHEN s.channel IN ('chat','app') OR s.channel IS NULL THEN 'app' ELSE s.channel END)=?"
+            )
+            params.append(channel)
+        if before is not None:
+            clauses.append("e.seq < ?")
+            params.append(before)
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT e.*, COALESCE(json_extract(t.summary_json, '$.tool_call_count'),0) AS tool_call_count, json_extract(t.summary_json, '$.duration_ms') AS duration_ms
+                FROM events e LEFT JOIN sessions s ON s.session_id=e.session_id
+                LEFT JOIN turn_traces t ON t.turn_id=e.turn_id AND t.session_id=e.session_id
+                WHERE {" AND ".join(clauses)} ORDER BY e.seq DESC LIMIT ?""",
+                [*params, limit + 1],
+            ).fetchall()
+        messages = [_event_row_to_message(r) for r in rows[:limit]]
+        for message, row in zip(messages, rows):
+            message["tool_call_count"] = row["tool_call_count"] if message["role"] == "assistant" else 0
+            message["duration_ms"] = row["duration_ms"] if message["role"] == "assistant" else None
+        return {"messages": messages, "next_before": messages[-1]["seq"] if len(rows) > limit else None}
+
+    def message_detail(self, message):
+        """Read only this message's public response/reasoning and tool activity.
+
+        The caller checks ownership first. Never return the trace's model input,
+        system prompts or other messages; even a malformed turn link must not
+        allow activity from a different session to appear here.
+        """
+        from yumi.core.platform.storage.tool_run_store import ToolRunStore
+        from yumi.core.platform.tools.trace import _truncate_args, _truncate_result_preview
+
+        detail = {**message, "tool_calls": [], "activity_available": False}
+        if message["role"] != "assistant" or not message.get("turn_id"):
+            return detail
+        trace = self.sqlite.get_turn_trace(message["turn_id"])
+        if not trace or trace.get("session_id") != message["session_id"]:
+            return detail
+        detail["activity_available"] = True
+        for key in ("duration_ms", "confirmation_wait_ms", "first_response_ms"):
+            detail[key] = trace.get(key)
+        reasoning = [str(r.get("reasoning_text") or "") for r in trace.get("rounds", [])]
+        detail["thought"] = "\n\n".join(r for r in reasoning if r.strip()) or message.get("thought", "")
+        runs = ToolRunStore(self.sqlite, self.owner)
+        for step in trace.get("rounds", []):
+            calls = [c for c in step.get("tool_calls", []) if isinstance(c, dict)]
+            results = [r for r in step.get("tool_results", []) if isinstance(r, dict)]
+            used = set()
+            for index, call in enumerate(calls):
+                fn = call.get("function") or {}
+                result_index = next(
+                    (
+                        i
+                        for i, r in enumerate(results)
+                        if i not in used and call.get("id") and r.get("call_id") == call["id"]
+                    ),
+                    None,
+                )
+                result = results[result_index] if result_index is not None else {}
+                if result_index is not None:
+                    used.add(result_index)
+                saved = runs.get(f"ai-{message['turn_id']}-{call.get('id')}") or {}
+                # IDs are globally unique, but still verify the message linkage.
+                if saved.get("session_id") != message["session_id"]:
+                    saved = {}
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        pass
+                detail["tool_calls"].append(
+                    {
+                        "id": call.get("id") or f"{step.get('index', 0)}-{index}",
+                        "name": result.get("resolved_tool") or fn.get("name") or result.get("tool", "Tool"),
+                        "arguments": _truncate_args(saved.get("arguments", args)),
+                        "result": _truncate_result_preview(saved.get("result", result.get("result_preview", ""))),
+                        "status": saved.get("status", result.get("status", "unknown")),
+                        "duration_ms": saved.get("duration_ms", result.get("duration_ms")),
+                        "approval": saved.get("approval", "legacy"),
+                        "action_summary": saved.get("action_summary"),
+                        "edge": result.get("edge"),
+                    }
+                )
+            for index, result in enumerate(results):
+                if index in used:
+                    continue
+                detail["tool_calls"].append(
+                    {
+                        "id": result.get("call_id") or f"result-{index}",
+                        "name": result.get("resolved_tool") or result.get("tool", "Tool"),
+                        "arguments": None,
+                        "result": _truncate_result_preview(result.get("result_preview", "")),
+                        "status": result.get("status", "unknown"),
+                        "duration_ms": result.get("duration_ms"),
+                        "approval": "legacy",
+                        "edge": result.get("edge"),
+                    }
+                )
+        return detail
+
+    def memories(self, *, include_deleted=False) -> list[dict]:
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memories WHERE kind != 'tool_observation' "
+                + ("" if include_deleted else "AND deleted_at IS NULL ")
+                + "ORDER BY updated_at DESC"
+            ).fetchall()
+        return [
+            {
+                **dict(r),
+                "source_message_ids": json.loads(r["source_event_ids_json"]),
+                "metadata": json.loads(r["metadata_json"]),
+            }
+            for r in rows
+            if not is_group_session(r["session_id"])
+        ]
+
+    def usage(self, days: int) -> dict:
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM token_usage WHERE created_at_num>=?
+                AND (owner_user_id=? OR owner_user_id='') ORDER BY created_at_num DESC""",
+                (int(start.timestamp() * 1000), self.owner),
+            ).fetchall()
+        totals = {k: sum(r[k] for r in rows) for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
+        daily = {}
+        for row in rows:
+            day = datetime.fromtimestamp(row["created_at_num"] / 1000, timezone.utc).date().isoformat()
+            daily[day] = daily.get(day, 0) + row["total_tokens"]
+        return {**totals, "days": days, "timezone": "UTC", "daily": daily, "recent": [dict(r) for r in rows[:30]]}
+
+    def monthly_usage(self, month: str, timezone_name: str) -> dict:
+        from calendar import monthrange
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            zone = ZoneInfo(timezone_name)
+            year, number = map(int, month.split("-"))
+            if not 1970 <= year <= 2200:
+                raise ValueError("Month is out of range")
+            start = datetime(year, number, 1, tzinfo=zone)
+            end = datetime(year + (number == 12), number % 12 + 1, 1, tzinfo=zone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("Provide a valid month and IANA timezone") from exc
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM token_usage WHERE created_at_num >= ? AND created_at_num < ? "
+                "AND (owner_user_id=? OR owner_user_id='') ORDER BY created_at_num DESC",
+                (int(start.timestamp() * 1000), int(end.timestamp() * 1000), self.owner),
+            ).fetchall()
+        keys = ("prompt_tokens", "completion_tokens", "total_tokens")
+        totals = {key: 0 for key in keys}
+        by_day = {f"{month}-{day:02d}": {**totals, "requests": 0, "models": {}, "recent": []}
+                  for day in range(1, monthrange(year, number)[1] + 1)}
+        models = {}
+        for row in rows:
+            day = datetime.fromtimestamp(row["created_at_num"] / 1000, zone).date().isoformat()
+            item = by_day[day]
+            for key in keys:
+                totals[key] += row[key]
+                item[key] += row[key]
+            item["requests"] += 1
+            name = row["model"] or "Unknown model"
+            item["models"][name] = item["models"].get(name, 0) + row["total_tokens"]
+            models[name] = models.get(name, 0) + row["total_tokens"]
+            if len(item["recent"]) < 10:
+                item["recent"].append(dict(row))
+        return {**totals, "month": month, "timezone": timezone_name, "requests": len(rows),
+                "daily": {day: item["total_tokens"] for day, item in by_day.items()},
+                "by_day": by_day, "models": models, "recent": [dict(row) for row in rows[:30]]}
+
+
+def meaningful_recall_query(query: str) -> bool:
+    compact = re.sub(r"[\W_]+", "", query.lower())
+    return len(compact) >= 3 and compact not in {
+        "继续",
+        "接着",
+        "然后呢",
+        "接下来呢",
+        "好的",
+        "为什么",
+        "第二个",
+        "第二个呢",
+        "再说说",
+        "continue",
+        "goon",
+        "next",
+        "whatnext",
+        "yes",
+        "ok",
+        "thesecondone",
+        "why",
+        "tellmemore",
+    }

@@ -136,6 +136,10 @@ def record_tool_trace(
     status: str,
     duration_ms: int,
     result_preview: str | None = None,
+    approval: str = "automatic",
+    turn_id: str = "",
+    tool_call_id: str = "",
+    action_summary: str | None = None,
 ) -> None:
     """Append one completed tool invocation (success, error, or denied)."""
     _bootstrap_from_disk_if_needed()
@@ -151,10 +155,43 @@ def record_tool_trace(
         "status": status,
         "duration_ms": duration_ms,
         "result_preview": _truncate_result_preview(result_preview),
+        "action_summary": action_summary,
     }
     with _lock:
         _buffer.appendleft(rec)
     _append_jsonl_line(rec)
+    # The account's durable history is separate from diagnostic ring buffers.
+    try:
+        from yumi.core.platform.plugins import get_memory_factory, get_session_scope
+        from yumi.core.platform.runtime.assistant_context import source_channel
+        from yumi.core.platform.storage.assistant_store import is_personal_session
+        from yumi.core.platform.storage.tool_run_store import ToolRunStore
+
+        owner = get_session_scope().owner_user_from_session_id(session_id)
+        if owner and is_personal_session(session_id):
+            store = ToolRunStore(get_memory_factory().get_for_session_owner(owner).sqlite, owner)
+            store.create(
+                {
+                    "id": f"ai-{turn_id}-{tool_call_id}" if turn_id and tool_call_id else rec["id"],
+                    "tool_name": tool_name,
+                    "origin": "ai",
+                    "channel": source_channel.get() or "unknown",
+                    "session_id": session_id,
+                    "status": status,
+                    "arguments": rec["arguments"],
+                    "result": rec["result_preview"],
+                    "duration_ms": duration_ms,
+                    "approval": approval,
+                    "created_at": rec["ts"],
+                    "steps": [approval, status],
+                    "action_summary": action_summary,
+                }
+            )
+    except Exception:
+        # Observability must never turn an already executed operation into a retry.
+        from yumi.logging_config import get_logger
+
+        get_logger(__name__).warning("Could not persist account tool history", exc_info=True)
 
 
 def _append_jsonl_line(rec: dict[str, Any]) -> None:
@@ -190,7 +227,7 @@ def list_traces(
 # Tool arguments and results are the caller's own words — `add_note(plan=
 # "明天记得买牛奶")` is a diary entry, not telemetry. Everything else in a trace
 # (which tool, how long, did it succeed) describes the system, not the person.
-_TRACE_CONTENT_FIELDS = ("arguments", "result_preview")
+_TRACE_CONTENT_FIELDS = ("arguments", "result_preview", "action_summary")
 
 
 def redact_trace_content(rec: dict[str, Any]) -> dict[str, Any]:

@@ -8,7 +8,9 @@ unit-testable: pass a context, observe the new state.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -45,6 +47,10 @@ class TurnContext:
     # Tracks consecutive normalization failures so we can bail out cleanly.
     tool_format_retries: int = 0
 
+    # Capture before waiting for another channel's turn to release the lock.
+    request_started: float = field(default_factory=time.perf_counter)
+    request_started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 
 @dataclass
 class ToolInvocation:
@@ -66,6 +72,8 @@ class ToolInvocation:
     # never model-supplied). Sent to edges as the ``caller_user_id`` frame
     # field so a shared edge can scope its work to the caller.
     caller_user_id: str | None = None
+    approval: str = "automatic"
+    action_summary: str | None = None
 
 
 @dataclass

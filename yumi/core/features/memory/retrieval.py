@@ -13,7 +13,10 @@ _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
 def tokenize(text: str) -> set[str]:
-    return {t.lower() for t in _TOKEN_RE.findall(text or "") if t.strip()}
+    tokens = {t.lower() for t in _TOKEN_RE.findall(text or "") if t.strip()}
+    for phrase in re.findall(r"[\u3400-\u9fff]+", text or ""):
+        tokens.update(phrase[i : i + 2] for i in range(len(phrase) - 1))
+    return tokens
 
 
 def keyword_score(query: str, content: str) -> float:

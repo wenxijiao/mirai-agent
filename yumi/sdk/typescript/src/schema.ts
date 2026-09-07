@@ -48,6 +48,7 @@ export function buildToolSchema(opts: RegisterOptions): Record<string, unknown> 
   if (opts.timeout != null) {
     schema.timeout = opts.timeout;
   }
+  if (opts.confirmationTemplate) schema.confirmation_template = opts.confirmationTemplate;
   if (opts.requireConfirmation) {
     schema.require_confirmation = true;
   }

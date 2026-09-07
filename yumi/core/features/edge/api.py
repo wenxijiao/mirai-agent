@@ -54,6 +54,7 @@ def _mount_edge_tools(connection_key: str, tool_prefix: str, tools: list) -> lis
             "schema": schema_copy,
             "timeout": schema_copy.pop("timeout", None),
             "require_confirmation": bool(schema_copy.pop("require_confirmation", False)),
+            "confirmation_template": schema_copy.pop("confirmation_template", None),
             # Optional per-tool entitlement key (popped so it never reaches the LLM
             # schema). A plugin's EdgeScope may use it to gate individual tools by
             # subscription (e.g. an app's Pro-only tools), not just the whole edge.
@@ -292,6 +293,12 @@ async def handle_edge_peer(peer):
             get_edge_scope().on_edge_register(connection_key, auth_msg)
         except Exception as exc:
             logger.debug("EdgeScope.on_edge_register raised: %s", exc)
+
+        registration_response = getattr(edge_scope, "edge_registration_response", None)
+        if callable(registration_response):
+            response = registration_response(connection_key, auth_msg)
+            if response:
+                await peer.send_json(response)
 
         logger.info(
             "Edge connected: device [%s] owner=%r key=%r with %s mounted tool(s). "

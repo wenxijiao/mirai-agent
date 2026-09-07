@@ -184,6 +184,10 @@ TSharedPtr<FJsonObject> FYumiAgent::BuildToolSchema(const FYumiRegisterOptions& 
     {
         Schema->SetNumberField(TEXT("timeout"), Opts.Timeout);
     }
+    if (!Opts.ConfirmationTemplate.IsEmpty())
+    {
+        Schema->SetStringField(TEXT("confirmation_template"), Opts.ConfirmationTemplate);
+    }
     if (Opts.bRequireConfirmation)
     {
         Schema->SetBoolField(TEXT("require_confirmation"), true);

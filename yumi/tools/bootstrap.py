@@ -10,7 +10,13 @@ from yumi.core.features.proactive.timer_tools import cancel_timer, list_timers, 
 from yumi.core.platform.tools.tool import register_tool
 from yumi.tools.edge_discovery_tools import discover_app_tools
 from yumi.tools.file_tools import list_files, read_file
-from yumi.tools.user_context_tools import forget_user_context, list_user_context, remember_user_context
+from yumi.tools.user_context_tools import (
+    forget_user_context,
+    list_user_context,
+    remember_user_context,
+    set_response_language,
+    update_user_context,
+)
 from yumi.tools.web_tools import fetch_webpage, get_weather, web_search
 
 
@@ -120,6 +126,7 @@ def init_yumi() -> None:
             "you MUST call this tool with that exact path before answering; do not claim you cannot read files. "
             "Supports plain text, PDF, Word (.docx), CSV, JSON, and common code/markup types."
         ),
+        confirmation_template={'zh': '读取文件「{path}」', 'en': 'Read file {path}'},
         params={
             "file_path": (
                 "Absolute or relative path to the file. "
@@ -161,6 +168,7 @@ def init_yumi() -> None:
             "news, 'latest X', today's events — pass time_range='day' or 'week'. "
             "Results are snippets; call fetch_webpage on a result URL to read the full page."
         ),
+        confirmation_template={'zh': '搜索「{query}」', 'en': 'Search for {query}'},
         params={
             "query": "The search keywords or question to look up (any language)",
             "max_results": "Maximum number of results to return, between 1 and 10",
@@ -190,6 +198,7 @@ def init_yumi() -> None:
     register_tool(
         get_weather,
         "Get the current weather for a city or location.",
+        confirmation_template={'zh': '查询「{location}」的天气', 'en': 'Check the weather in {location}'},
         params={
             "location": "City name or geographic location to get weather for",
         },
@@ -199,11 +208,21 @@ def init_yumi() -> None:
     # Durable user context tools
 
     register_tool(
+        set_response_language,
+        "Save the user's explicitly requested default reply language. Updates Personalization, not a separate memory. "
+        "Only call when asked to change a lasting preference, never for a one-off translation or language request.",
+        confirmation_template={'zh': '将默认回复语言设为「{language}」', 'en': 'Set default reply language to {language}'},
+        params={"language": "Use auto to match each user message naturally, or a language/variety name or code (up to 80 characters), "
+                             "such as Arabic, Māori, Portuguese (Brazil), Cantonese, or pt-BR. The app and chat share this setting."},
+    )
+
+    register_tool(
         remember_user_context,
         (
             "Save a durable Stable User Context memory. Use this only when the user explicitly asks "
             "Yumi to remember something, or when they confirm a suggested memory should be saved. "
-            "Do not use it for ordinary transient chat details."
+            "Do not use it for ordinary transient chat details. Preferences share the app list. "
+            "When changing an existing preference, list it and use update_user_context with its id instead of adding a conflicting entry."
         ),
         params={
             "content": "The concise durable memory to save.",
@@ -224,6 +243,15 @@ def init_yumi() -> None:
             "limit": "Maximum number of memories to return, between 1 and 50.",
         },
         returns="Saved stable user context memories with ids.",
+    )
+
+    register_tool(
+        update_user_context,
+        "Replace one existing saved preference when the user asks to change it. Updates the same entry shown in "
+        "Personalization. Use list_user_context to identify the entry first; do not silently overwrite unrelated rules.",
+        params={"memory_id": "The existing preference id from list_user_context.",
+                "content": "The complete replacement preference, reflecting the user's requested change."},
+        returns="Updated preference id and content, or the updated reply language.",
     )
 
     register_tool(

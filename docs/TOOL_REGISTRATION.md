@@ -43,6 +43,7 @@ register_tool(
     proactive_context_args=None,
     proactive_context_description=None,
     default_require_confirmation=False,
+    confirmation_template=None,
 ) -> None
 ```
 
@@ -60,6 +61,36 @@ Parameters:
 - `default_require_confirmation`: If `true`, the tool is added to the runtime confirmation set on startup (unless the user has opted into `local_tools_always_allow`). Use for high-blast-radius tools such as filesystem or network mutations. Default: `false`.
 
 Type hints are converted into JSON schema. Supported common types include `str`, `int`, `float`, `bool`, `list`, `dict`, and simple optional types. Parameters without defaults are required.
+
+## User-facing action descriptions
+
+Supply optional `confirmation_template` on server-local/Python tools, or
+`confirmationTemplate` / `ConfirmationTemplate` on other SDK options. It explains
+the pending action without making users read function names and JSON:
+
+```python
+agent.register(
+    get_weather,
+    "Get weather for a city and day.",
+    confirmation_template={
+        "zh": "查询「{city}」「{day}」的天气",
+        "en": "Check the weather in {city} for {day}",
+    },
+    require_confirmation=True,
+)
+```
+
+The server substitutes **actual arguments and advertised schema defaults**.
+Only top-level `{parameter}` placeholders are accepted; attribute access,
+indexing, conversions and formatting expressions are rejected. Secret-named
+fields are redacted. Invalid, missing or overly long substitutions fall back to
+the normal function/parameter presentation. The app keeps the original parameters
+in expandable details and saves `action_summary` with the invocation history.
+This metadata is excluded from the model's function schema and never grants tool
+permission. Old registrations remain valid without it.
+
+Python and TypeScript accept a locale map or a string; the other native SDK
+options accept a string. Use a plain string for a single-language tool.
 
 ## Python Edge SDK
 

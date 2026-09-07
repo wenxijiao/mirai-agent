@@ -69,6 +69,8 @@ export interface RegisterOptions {
   parameters?: ToolParameter[];
   timeout?: number;
   requireConfirmation?: boolean;
+  /** User-facing action with {parameter} placeholders; optional localized templates. */
+  confirmationTemplate?: string | Record<string, string>;
   /**
    * Exposure mode (pick one per tool):
    * - "dynamic" (default): joins dynamic top-K retrieval.

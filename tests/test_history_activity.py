@@ -1,0 +1,122 @@
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from yumi.core.features.assistant import router as assistant
+from yumi.core.platform.http.dependencies import current_identity_dependency
+from yumi.core.platform.plugins import Identity
+from yumi.core.platform.storage.assistant_store import AssistantStore
+from yumi.core.platform.storage.sqlite_store import SQLiteStore
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    store = AssistantStore(SQLiteStore(tmp_path / "history.db"), "alice")
+    monkeypatch.setattr(assistant, "_store", lambda identity: store)
+
+    def own(identity, row):
+        if not row["session_id"].startswith("u_alice__"):
+            raise HTTPException(403, "Not your message")
+
+    monkeypatch.setattr(
+        assistant,
+        "get_session_scope",
+        lambda: SimpleNamespace(
+            ensure_message_owned_by_identity=own,
+            session_id_prefix_for_identity=lambda identity: "u_alice__",
+        ),
+    )
+    app = FastAPI()
+    app.include_router(assistant.router)
+    app.dependency_overrides[current_identity_dependency] = lambda: Identity(user_id="alice")
+    with TestClient(app) as client:
+        yield store, client
+
+
+def put(store, mid="answer", role="assistant", sid="u_alice__personal_1"):
+    store.sqlite.upsert_event_from_message(
+        {
+            "id": mid,
+            "session_id": sid,
+            "role": role,
+            "content": "The reply",
+            "turn_id": "turn",
+            "thought": "Saved thought",
+        }
+    )
+
+
+def trace(store, sid="u_alice__personal_1"):
+    store.sqlite.upsert_turn_trace(
+        {
+            "id": "turn",
+            "session_id": sid,
+            "system_prompt": "Do not expose this",
+            "summary": {"tool_call_count": 1},
+            "rounds": [
+                {
+                    "reasoning_text": "Reasoning before the call",
+                    "tool_calls": [
+                        {
+                            "id": "call",
+                            "function": {"name": "get_weather", "arguments": '{"city":"Auckland","password":"secret"}'},
+                        }
+                    ],
+                    "tool_results": [
+                        {
+                            "call_id": "call",
+                            "tool": "get_weather",
+                            "status": "success",
+                            "duration_ms": 25,
+                            "result_preview": "Sunny",
+                        }
+                    ],
+                },
+                {"reasoning_text": "Reasoning after the call"},
+            ],
+        },
+        owner_user_id="alice",
+    )
+
+
+def test_detail_recovers_reasoning_and_tools_without_model_inputs(env):
+    store, client = env
+    put(store)
+    trace(store)
+    result = client.get("/assistant/history/answer")
+    assert result.status_code == 200
+    body = result.json()
+    assert body["thought"] == "Reasoning before the call\n\nReasoning after the call"
+    assert body["content"] == "The reply"
+    assert body["tool_calls"][0]["result"] == "Sunny"
+    assert body["tool_calls"][0]["arguments"] == {"city": "Auckland", "password": "[redacted]"}
+    assert "Do not expose" not in result.text
+    assert client.get("/assistant/history").json()["messages"][0]["tool_call_count"] == 1
+
+
+def test_user_messages_never_include_assistant_activity_and_missing_traces_stay_empty(env):
+    store, client = env
+    put(store, mid="question", role="user")
+    trace(store)
+    assert client.get("/assistant/history/question").json()["tool_calls"] == []
+    assert client.get("/assistant/history").json()["messages"][0]["tool_call_count"] == 0
+    put(store)
+    store.sqlite.delete_turn_traces_for_session("u_alice__personal_1")
+    body = client.get("/assistant/history/answer").json()
+    assert body["thought"] == "Saved thought" and body["tool_calls"] == []
+    assert body["activity_available"] is False
+
+
+def test_activity_never_crosses_sessions_and_hidden_messages_are_rejected(env):
+    store, client = env
+    put(store)
+    trace(store, sid="u_bob__personal_1")
+    body = client.get("/assistant/history/answer").json()
+    assert body["thought"] == "Saved thought" and body["tool_calls"] == []
+    put(store, mid="other", sid="u_bob__personal_1")
+    put(store, mid="group", sid="u_alice__group_1")
+    assert client.get("/assistant/history/other").status_code == 403
+    assert client.get("/assistant/history/group").status_code == 404
+    store.sqlite.delete_message("answer")
+    assert client.get("/assistant/history/answer").status_code == 404

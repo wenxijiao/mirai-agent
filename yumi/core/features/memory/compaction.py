@@ -144,14 +144,18 @@ async def compact_session_if_needed(bot: Any, session_id: str) -> bool:
     hard_cap = max(1, min(500, int(cfg.memory_max_recent_messages)))
 
     memory = bot.session_memory(session_id)
+    stamp = memory.redaction_stamp() if hasattr(memory, "redaction_stamp") else ""
+    keep_tail = min(keep_tail, max(1, hard_cap - 2))
     summary_row = memory.get_session_summary(session_id) or {}
     watermark = int(summary_row.get("covered_until_num") or 0)
     previous_summary = str(summary_row.get("summary") or "").strip()
 
     rows = _fetch_rows_after(memory, watermark, hard_cap * 2)
+    if hasattr(memory, "can_recall"):
+        rows = [row for row in rows if memory.can_recall(row)]
     if not rows:
         return False
-    if transcript_token_estimate(rows) <= budget:
+    if transcript_token_estimate(rows) <= budget and len(rows) <= hard_cap:
         return False
 
     cut = _cut_index(rows, keep_tail)
@@ -178,7 +182,11 @@ async def compact_session_if_needed(bot: Any, session_id: str) -> bool:
     new_watermark = int(head[-1].get("timestamp_num") or 0)
     if new_watermark <= watermark:
         return False
+    if hasattr(memory, "redaction_stamp") and memory.redaction_stamp() != stamp:
+        return False  # Sources changed while the model was summarizing.
     memory.update_session_summary(new_summary[:6000], session_id=session_id, covered_until_num=new_watermark)
+    if hasattr(memory, "mark_summary_safe"):
+        memory.mark_summary_safe(session_id, new_summary[:6000], stamp)
     logger.info(
         "Compacted session %s: folded %d message(s) into the summary (watermark %d → %d, tail keeps %d rows from %s)",
         session_id,

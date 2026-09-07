@@ -197,12 +197,22 @@ class _DiscordChatHandler(BaseChannelHandler):
         return "".join(self.text_parts)
 
 
-async def _post_clear_session(connection: ConnectionConfig, session_id: str) -> tuple[bool, str]:
+async def _post_clear_session(
+    connection: ConnectionConfig, session_id: str, *, personal: bool = True
+) -> tuple[bool, str]:
     url = _api_url(connection, f"/clear?session_id={session_id}")
     headers = connection.auth_headers()
     timeout = httpx.Timeout(10.0, read=30.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(url, headers=headers)
+        if personal:
+            state = await client.get(_api_url(connection, "/assistant"), headers=headers)
+            if state.status_code >= 400:
+                return False, state.text[:500]
+            r = await client.post(
+                _api_url(connection, "/assistant/reset"), headers=headers, json={"revision": state.json()["revision"]}
+            )
+        else:
+            r = await client.post(url, headers=headers)
         if r.status_code >= 400:
             return False, r.text[:500]
         return True, ""
@@ -431,9 +441,12 @@ def build_client():
             return
         session_id = _session_id_for_user(ctx.author.id)
         connection = chat_connection_config(ctx.author.id)
-        ok, err = await _post_clear_session(connection, session_id)
+        private = ctx.guild is None
+        if not private:
+            session_id = f"group_dc_{ctx.channel.id}_{ctx.author.id}"
+        ok, err = await _post_clear_session(connection, session_id, personal=private)
         if ok:
-            await ctx.send("Session cleared.")
+            await ctx.send("Context restarted. Your history and saved memories are kept.")
         else:
             await ctx.send(_truncate_for_discord(f"Failed to clear: {err}"))
 
@@ -536,14 +549,15 @@ def build_client():
 
     async def _run_chat_turn(message, prompt: str) -> None:
         user_id = message.author.id
-        session_id = _session_id_for_user(user_id)
+        private = message.guild is None
+        session_id = _session_id_for_user(user_id) if private else f"group_dc_{message.channel.id}_{user_id}"
         connection = chat_connection_config(user_id)
         record_user_message(session_id)
 
         url = _chat_url(connection)
         headers = connection.auth_headers()
         headers["Content-Type"] = "application/json"
-        payload = {"prompt": prompt, "session_id": session_id}
+        payload = {"prompt": prompt, "session_id": session_id, "personal": private, "channel": "discord"}
         timeout = httpx.Timeout(10.0, read=600.0)
 
         handler = _DiscordChatHandler(channel=message.channel, connection=connection)

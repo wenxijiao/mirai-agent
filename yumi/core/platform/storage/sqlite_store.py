@@ -1173,7 +1173,11 @@ def _event_fields_from_message(message: dict[str, Any]) -> dict[str, Any]:
     tool_name = ""
     tool_args_json = ""
     tool_calls_json = ""
-    metadata: dict[str, Any] = {}
+    from yumi.core.platform.runtime.assistant_context import source_channel
+
+    metadata: dict[str, Any] = dict(message.get("metadata") or {})
+    if source_channel.get():
+        metadata.setdefault("channel", source_channel.get())
 
     if role == "assistant" and raw_content.startswith(YUMI_V1_TOOL_CALLS):
         event_type = "assistant_tool_calls"
@@ -1226,6 +1230,9 @@ def _event_fields_from_message(message: dict[str, Any]) -> dict[str, Any]:
 def _event_row_to_message(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
+        "seq": row["seq"],
+        "channel": (_json_loads(row["metadata_json"], {}) or {}).get("channel")
+        or _channel_from_session_id(row["session_id"]),
         "session_id": row["session_id"],
         "turn_id": row["turn_id"] or "",
         "event_type": row["event_type"],
@@ -1261,7 +1268,15 @@ def _derive_title(content: str) -> str:
 
 
 def _channel_from_session_id(session_id: str) -> str:
-    for prefix, channel in (("tg_", "telegram"), ("voice_", "voice"), ("chat_", "chat")):
+    session_id = session_id.split("__", 1)[-1]
+    for prefix, channel in (
+        ("tg_", "telegram"),
+        ("dc_", "discord"),
+        ("line_", "line"),
+        ("voice_", "voice"),
+        ("chat_", "chat"),
+        ("personal_", "app"),
+    ):
         if session_id.startswith(prefix):
             return channel
     return "chat"

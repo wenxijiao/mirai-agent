@@ -10,6 +10,7 @@ _TOOL_RUNTIME_METADATA_KEYS = {
     "timeout",
     "require_confirmation",
     "always_include",
+    "confirmation_template",
 }
 
 

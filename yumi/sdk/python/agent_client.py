@@ -262,6 +262,8 @@ def _find_env_file(start_dir: str) -> str:
 def _wire_tool_schema(tool_entry: dict) -> dict:
     """Build the JSON tool object sent on edge WebSocket register."""
     sch = copy.deepcopy(tool_entry["schema"])
+    if tool_entry.get("confirmation_template"):
+        sch["confirmation_template"] = tool_entry["confirmation_template"]
     if tool_entry.get("require_confirmation"):
         sch["require_confirmation"] = True
     if tool_entry.get("always_include"):
@@ -358,6 +360,11 @@ def _build_tool_schema(
 
         annotation = hints.get(param_name, param.annotation)
         param_schema = _annotation_to_schema(annotation)
+        if param.default is not inspect.Parameter.empty:
+            try:
+                param_schema["default"] = json.loads(json.dumps(param.default, allow_nan=False))
+            except (TypeError, ValueError):
+                pass  # Opaque Python defaults cannot be advertised on the wire.
         if resolved_params and param_name in resolved_params:
             param_schema["description"] = resolved_params[param_name]
         else:
@@ -448,6 +455,30 @@ class YumiAgent:
         self._relay_access_token: str | None = None
         self._register_connection_code: str | None = None
 
+    def _pairing_file(self, ws_url: str) -> str:
+        import hashlib
+        key = hashlib.sha256(f"{ws_url}\0{self._edge_name}\0{self._connection_code or ''}".encode()).hexdigest()
+        return os.path.join(os.path.expanduser("~"), ".yumi", "edge_credentials", key + ".json")
+
+    def _load_pairing_token(self, ws_url: str) -> str | None:
+        try:
+            with open(self._pairing_file(ws_url), encoding="utf-8") as handle:
+                value = json.load(handle)
+            return value.get("access_token") if isinstance(value, dict) else None
+        except (OSError, ValueError):
+            return None
+
+    def _save_pairing_token(self, ws_url: str, token: str) -> None:
+        path = self._pairing_file(ws_url)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        # Do not include tokens in diagnostics or a project's checked-in files.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"access_token": token}, handle)
+
     def _confirmation_policy_path(self) -> str:
         override = (os.getenv("YUMI_TOOL_CONFIRMATION_PATH") or "").strip()
         if override:
@@ -520,6 +551,7 @@ class YumiAgent:
         returns: str | None = None,
         timeout: int | None = None,
         require_confirmation: bool = False,
+        confirmation_template: str | dict[str, str] | None = None,
         mode: str = "dynamic",
         context_args: dict[str, Any] | None = None,
         context_label: str | None = None,
@@ -626,6 +658,7 @@ class YumiAgent:
             "schema": schema,
             "callable": func,
             "require_confirmation": require_confirmation,
+            "confirmation_template": confirmation_template,
             "always_include": always_include,
             "allow_proactive": allow_proactive,
             "proactive_context": proactive_context,
@@ -790,13 +823,17 @@ class YumiAgent:
 
                 register_payload = {
                     "type": "register",
+                    "supports_pairing_tokens": True,
                     "edge_name": self._edge_name,
                     "tools": [_wire_tool_schema(t) for t in list(self._tools.values())],
                     "tool_confirmation_policy": self._load_confirmation_policy(),
                 }
                 if connection.access_token:
                     register_payload["access_token"] = connection.access_token
-                if self._register_connection_code:
+                paired_token = self._load_pairing_token(ws_url) if self._register_connection_code else None
+                if paired_token:
+                    register_payload["access_token"] = paired_token
+                elif self._register_connection_code and not connection.access_token:
                     register_payload["connection_code"] = self._register_connection_code
 
                 async with websockets.connect(ws_url) as ws:
@@ -821,7 +858,11 @@ class YumiAgent:
                             msg = json.loads(raw)
                             msg_type = msg.get("type")
 
-                            if msg_type == "persist_tool_confirmation_policy":
+                            if msg_type == "edge_paired":
+                                token = msg.get("access_token")
+                                if msg.get("edge_name") == self._edge_name and isinstance(token, str) and token:
+                                    self._save_pairing_token(ws_url, token)
+                            elif msg_type == "persist_tool_confirmation_policy":
                                 aa = msg.get("always_allow") or []
                                 fc = msg.get("force_confirm") or []
                                 if isinstance(aa, list) and isinstance(fc, list):

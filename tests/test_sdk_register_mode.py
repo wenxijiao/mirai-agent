@@ -51,3 +51,42 @@ def test_deprecated_flags_still_honored():
     a = _agent()
     a.register(lambda: 1, "desc", always_include=True, name="old")
     assert a._tools["old"]["always_include"] is True
+
+
+def test_confirmation_template_is_optional_wire_metadata():
+    from yumi.sdk.python.agent_client import _wire_tool_schema
+
+    agent = _agent()
+
+    def weather(city: str, day: str = "后天"):
+        return city + day
+
+    agent.register(weather, "Weather", name="weather", confirmation_template={"zh": "查询「{city}」「{day}」的天气"})
+    wire = _wire_tool_schema(agent._tools["weather"])
+    from yumi.core.platform.tools.presentation import render_action_summary
+
+    assert (
+        render_action_summary(
+            wire["confirmation_template"], {"city": "奥克兰"}, wire["function"]["parameters"], locale="zh"
+        )
+        == "查询「奥克兰」「后天」的天气"
+    )
+    assert "confirmation_template" not in wire["function"]
+
+
+def test_pairing_token_storage_is_private_and_scoped(tmp_path, monkeypatch):
+    import os
+
+    agent = _agent()
+    agent._connection_code = "code-A"
+    monkeypatch.setattr("os.path.expanduser", lambda path: str(tmp_path) if path == "~" else path)
+    url = "wss://test.example/ws/edge"
+    agent._save_pairing_token(url, "test-credential")
+    assert agent._load_pairing_token(url) == "test-credential"
+    assert os.stat(agent._pairing_file(url)).st_mode & 0o777 == 0o600
+    assert agent._load_pairing_token("wss://other.example/ws/edge") is None
+    agent._connection_code = "code-B"
+    assert agent._load_pairing_token(url) is None
+    agent._connection_code = "code-A"
+    agent._edge_name = "other-device"
+    assert agent._load_pairing_token(url) is None

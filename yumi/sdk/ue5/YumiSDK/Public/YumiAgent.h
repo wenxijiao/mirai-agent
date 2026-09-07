@@ -57,6 +57,7 @@ struct FYumiRegisterOptions
     bool bProactiveContext = false;
     TSharedPtr<FJsonObject> ProactiveContextArgs;
     FString ProactiveContextDescription;
+    FString ConfirmationTemplate;
 };
 
 /**

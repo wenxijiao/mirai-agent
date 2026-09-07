@@ -150,6 +150,8 @@ def begin_turn(
     timer_callback: bool,
     prompt_metadata: dict[str, str] | None = None,
     owner_user_id: str = "",
+    started_monotonic: float | None = None,
+    started_at: str | None = None,
 ) -> None:
     with _lock:
         previous = _active_turn(session_id)
@@ -167,7 +169,7 @@ def begin_turn(
             "prompt_preview": " ".join((prompt or "").split())[:180],
             "think": bool(think),
             "timer_callback": bool(timer_callback),
-            "started_at": _now(),
+            "started_at": started_at or _now(),
             "ended_at": None,
             "duration_ms": None,
             "status": "running",
@@ -175,7 +177,7 @@ def begin_turn(
             "rounds": [],
             "timeline": [],
             **(prompt_metadata or {}),
-            "_started": time.perf_counter(),
+            "_started": time.perf_counter() if started_monotonic is None else started_monotonic,
         }
         _turns[turn_id] = turn
         _turns.move_to_end(turn_id)
@@ -392,6 +394,8 @@ def record_stream_event(session_id: str, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "")
         content = str(event.get("content") or "")
         if round_record is not None and event_type in {"text", "thought"}:
+            if content and "first_response_ms" not in turn:
+                turn["first_response_ms"] = int((time.perf_counter() - turn.get("_started", time.perf_counter())) * 1000)
             key = "response_text" if event_type == "text" else "reasoning_text"
             existing = str(round_record.get(key) or "")
             round_record[key] = existing + content
@@ -424,6 +428,13 @@ def record_stream_event(session_id: str, event: dict[str, Any]) -> None:
             )
 
 
+def record_confirmation_wait(session_id: str, duration_ms: int) -> None:
+    with _lock:
+        turn = _active_turn(session_id)
+        if turn is not None:
+            turn["confirmation_wait_ms"] = turn.get("confirmation_wait_ms", 0) + max(0, duration_ms)
+
+
 def end_turn(
     session_id: str,
     *,
@@ -445,6 +456,7 @@ def end_turn(
             turn["duration_ms"] = int((time.perf_counter() - started) * 1000)
         if turn.get("status") == "running":
             turn["status"] = "complete"
+        turn.setdefault("confirmation_wait_ms", 0)
         turn["usage"] = {
             "prompt_tokens": int(total_prompt_tokens or 0),
             "completion_tokens": int(total_completion_tokens or 0),
@@ -493,6 +505,8 @@ def _summary(turn: dict[str, Any]) -> dict[str, Any]:
         "started_at": turn.get("started_at"),
         "ended_at": turn.get("ended_at"),
         "duration_ms": turn.get("duration_ms"),
+        "confirmation_wait_ms": turn.get("confirmation_wait_ms", 0),
+        "first_response_ms": turn.get("first_response_ms"),
         "status": turn.get("status"),
         "provider": last.get("provider") or "",
         "model": last.get("model") or usage.get("model") or "",

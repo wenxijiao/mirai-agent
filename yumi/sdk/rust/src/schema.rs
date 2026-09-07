@@ -38,6 +38,9 @@ pub fn build_tool_schema(opts: &RegisterOptions) -> Value {
             .unwrap()
             .insert("timeout".to_string(), json!(t));
     }
+    if let Some(template) = &opts.confirmation_template {
+        schema["confirmation_template"] = json!(template);
+    }
     if opts.require_confirmation {
         schema
             .as_object_mut()

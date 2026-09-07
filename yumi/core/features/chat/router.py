@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from yumi.core.features.chat.pipeline import clear_session, generate_chat_events
@@ -25,18 +27,43 @@ async def chat_endpoint(request: Request, identity: CurrentIdentity, body: ChatR
     if not tok_ok:
         raise HTTPException(status_code=429, detail=tok_err)
     sid = get_session_scope().qualify_session_http(identity, body.session_id)
+    store = None
+    if body.personal:
+        from yumi.core.platform.storage.assistant_store import AssistantStore
+
+        store = AssistantStore(get_memory_factory().get_for_identity(identity).sqlite, identity.user_id)
+        current = store.current(lambda value: get_session_scope().qualify_session_http(identity, value))
+        if body.revision is not None and body.revision != current["revision"]:
+            raise HTTPException(409, "Conversation changed. Refresh before sending.")
+        sid = current["session_id"]
     audit_event("chat_request", identity.user_id, session_id=sid)
 
     async def generate():
-        # Tests monkey-patch ``yumi.core.features.chat.router.generate_chat_events``
-        # to substitute a fake generator. The lookup happens here (via module
-        # globals) so the patch is honored on every request.
-        charged = False
-        async for event in generate_chat_events(body.prompt, sid, think=body.think):
-            if not charged and event.get("type") != "error":
-                quota.record_chat_turn(identity)
-                charged = True
-            yield stream_event(event["type"], **{k: v for k, v in event.items() if k != "type"})
+        from yumi.core.platform.runtime.assistant_context import active_requests, source_channel
+
+        task = asyncio.current_task()
+        token = source_channel.set(body.channel if body.personal else None)
+        active_requests.setdefault(sid, set()).add(task)
+        try:
+            if store and store.get("state")["session_id"] != sid:
+                yield stream_event(
+                    "error", code="CONTEXT_CHANGED", content="Conversation restarted. Please send again."
+                )
+                return
+            charged = False
+            async for event in generate_chat_events(body.prompt, sid, think=body.think):
+                if store and store.get("state")["session_id"] != sid:
+                    yield stream_event("error", code="CONTEXT_CHANGED", content="Conversation restarted.")
+                    return
+                if not charged and event.get("type") != "error":
+                    quota.record_chat_turn(identity)
+                    charged = True
+                yield stream_event(event["type"], **{k: v for k, v in event.items() if k != "type"})
+        finally:
+            source_channel.reset(token)
+            active_requests.get(sid, set()).discard(task)
+            if not active_requests.get(sid):
+                active_requests.pop(sid, None)
 
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 

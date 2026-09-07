@@ -60,7 +60,12 @@ async def set_tool_confirmation_endpoint(identity: CurrentIdentity, request: Too
 
 
 @router.post("/tools/confirm")
-async def confirm_tool_endpoint(request: ToolConfirmationResponse):
+async def confirm_tool_endpoint(request: ToolConfirmationResponse, identity: CurrentIdentity):
+    from yumi.core.platform.runtime import get_default_runtime
+
+    owner = get_default_runtime().tool_policy.confirmation_owners.get(request.call_id)
+    if owner is not None and owner != identity.user_id:
+        raise HTTPException(status_code=404, detail="No pending confirmation with that call_id.")
     future = PENDING_CONFIRMATIONS.get(request.call_id)
     if future is None or future.done():
         raise HTTPException(status_code=404, detail="No pending confirmation with that call_id.")

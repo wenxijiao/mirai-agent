@@ -114,6 +114,7 @@ type RegisterOptions struct {
 	Description string
 	Parameters  []ToolParameter
 	Timeout     *int // per-tool timeout override (seconds)
+	ConfirmationTemplate string // Optional user-visible action with {parameter} placeholders.
 	RequireConfirmation bool
 
 	// Mode is the exposure mode (input sugar mapped onto the low-level wire

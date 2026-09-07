@@ -202,6 +202,7 @@ struct RegisterOptions {
     bool proactiveContext = false;
     nlohmann::json proactiveContextArgs = nullptr;
     std::string proactiveContextDescription;
+    std::string confirmationTemplate;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -858,6 +859,8 @@ public:
             opts.allowProactive, opts.proactiveContext,
             opts.proactiveContextArgs, opts.proactiveContextDescription
         );
+
+        if (!opts.confirmationTemplate.empty()) schema["confirmation_template"] = opts.confirmationTemplate;
 
         std::lock_guard<std::mutex> lock(toolsMutex_);
         tools_[opts.name] = {

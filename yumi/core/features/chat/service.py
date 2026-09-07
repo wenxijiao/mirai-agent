@@ -178,6 +178,9 @@ class ChatTurnService:
     ) -> AsyncIterator[dict]:
         owner_uid = get_session_scope().owner_user_from_session_id(session_id)
         owner_token = set_chat_owner_user_id(owner_uid)
+        from yumi.core.platform.runtime.assistant_context import conversation_session
+
+        session_token = conversation_session.set(session_id)
         ctx = TurnContext(
             prompt=prompt,
             session_id=session_id,
@@ -190,6 +193,7 @@ class ChatTurnService:
             async for event in self._run_turn(ctx, sink):
                 yield event
         finally:
+            conversation_session.reset(session_token)
             reset_chat_owner_user_id(owner_token)
 
     # ------------------------------------------------------------------------
@@ -204,6 +208,14 @@ class ChatTurnService:
         # gives us a deterministic "always run on cleanup" hook.
         usage = UsageRecorder(ctx, bot=None, owner_uid=ctx.owner_uid)
         try:
+            from yumi.core.platform.runtime.assistant_context import personal_store
+            from yumi.core.platform.storage.assistant_store import is_personal_session
+
+            if is_personal_session(ctx.session_id) and not ctx.timer_callback:
+                current = personal_store(ctx.owner_uid).get("state", {})
+                if current.get("session_id") != ctx.session_id:
+                    yield {"type": "error", "code": "CONTEXT_CHANGED", "content": "Conversation restarted. Send again."}
+                    return
             async for event in self._dispatch(ctx, sink, usage):
                 yield event
         finally:
@@ -229,6 +241,9 @@ class ChatTurnService:
                 schedule_compaction(ctx.session_id)
             except Exception:
                 logger.debug("compaction scheduling skipped", exc_info=True)
+
+        if sink.timing is not None:
+            yield sink.timing
 
     async def _dispatch(
         self,
@@ -305,12 +320,19 @@ class ChatTurnService:
         # ...) before replying. Per-tool errors are swallowed inside the helper;
         # this guard only covers a total failure.
         try:
-            runtime_context = await runtime_context_prompt_block()
+            from yumi.core.platform.storage.assistant_store import is_group_session
+
+            runtime_context = None if is_group_session(ctx.session_id) else await runtime_context_prompt_block()
         except Exception as exc:
             logger.debug("Context prefetch failed: %s", exc)
             runtime_context = None
         _append_system_note(ctx, runtime_context)
-        _append_system_note(ctx, build_turn_language_note(ctx.prompt))
+        from yumi.core.features.assistant.personalization import preferences
+        from yumi.core.platform.runtime.assistant_context import personal_store
+        from yumi.core.platform.storage.assistant_store import is_personal_session
+
+        language = preferences(personal_store(ctx.owner_uid))["response_language"] if is_personal_session(ctx.session_id) else "auto"
+        _append_system_note(ctx, build_turn_language_note(ctx.prompt, language))
 
         # Tool routing runs ONCE per turn. Re-selecting inside the loop churned
         # the tool list between iterations (forced edge tools grow mid-turn),
@@ -464,14 +486,14 @@ class ChatTurnService:
                     yield sink.emit(
                         ToolStatusEvent(
                             status="running",
-                            content=f"Running local tool '{inv.func_name}'...",
+                            content=inv.action_summary or f"Running local tool '{inv.func_name}'...",
                         )
                     )
                 else:
                     yield sink.emit(
                         ToolStatusEvent(
                             status="running",
-                            content=f"Calling '{inv.original_tool_name}' on edge device '{inv.target_edge}'...",
+                            content=inv.action_summary or f"Calling '{inv.original_tool_name}' on edge device '{inv.target_edge}'...",
                         )
                     )
 
@@ -493,7 +515,7 @@ class ChatTurnService:
                     yield sink.emit(
                         ToolStatusEvent(
                             status="success",
-                            content=f"Tool {result.display_label} finished successfully.",
+                            content=inv.action_summary or f"Tool {result.display_label} finished successfully.",
                         )
                     )
                 else:
@@ -591,6 +613,19 @@ class ChatTurnService:
                 "elapsed_ms": 0,
                 "fallback": True,
             }
+        from yumi.core.platform.runtime.assistant_context import personal_store
+        from yumi.core.platform.storage.assistant_store import is_group_session, is_personal_session
+
+        if is_group_session(ctx.session_id):
+            return []
+        if is_personal_session(ctx.session_id):
+            saved = personal_store(ctx.owner_uid).get("tools", {})
+            tools = [
+                t
+                for t in (tools or [])
+                if not saved.get(t["function"]["name"], {}).get("disabled")
+                and saved.get(t["function"]["name"], {}).get("ai_access") != "none"
+            ]
         if ctx.timer_callback:
             tools = _exclude_delay_scheduling_tools(tools)
         return tools

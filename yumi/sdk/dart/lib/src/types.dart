@@ -55,6 +55,8 @@ class RegisterOptions {
   final List<ToolParameter> parameters;
   final int? timeout;
   final bool requireConfirmation;
+  /// User-facing action with {parameter} placeholders.
+  final String? confirmationTemplate;
 
   /// Exposure mode (input sugar mapped onto the low-level wire flags).
   /// One of "dynamic" (default), "pinned", or "autorun":
@@ -84,6 +86,7 @@ class RegisterOptions {
     this.parameters = const [],
     this.timeout,
     this.requireConfirmation = false,
+    this.confirmationTemplate,
     this.mode = 'dynamic',
     this.contextArgs,
     this.contextLabel,
