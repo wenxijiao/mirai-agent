@@ -220,7 +220,9 @@ def test_chat_uses_saved_transcript_and_never_releases_another_requests_claim(mo
         response = await chat.chat_endpoint(
             None, identity, ChatRequest(prompt="Tampered prompt", session_id=row["session_id"], voice_id=row["id"])
         )
-        body = "".join([item async for item in response.body_iterator])
+        body = "".join(
+            [item if isinstance(item, str) else bytes(item).decode() async for item in response.body_iterator]
+        )
         assert json.loads(body)["code"] == "409"
         assert store.get(row["id"])["state"] == "sending"
         assert not seen
@@ -230,7 +232,9 @@ def test_chat_uses_saved_transcript_and_never_releases_another_requests_claim(mo
             identity,
             ChatRequest(prompt="Tampered prompt", session_id=row["session_id"], voice_id=row["id"], reply_voice=True),
         )
-        assert "Sunny" in "".join([item async for item in response.body_iterator])
+        assert "Sunny" in "".join(
+            [item if isinstance(item, str) else bytes(item).decode() async for item in response.body_iterator]
+        )
         assert message_media.get() is None
         with pytest.raises(HTTPException) as error:
             await chat.chat_endpoint(
