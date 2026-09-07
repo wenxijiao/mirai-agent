@@ -120,3 +120,26 @@ def test_activity_never_crosses_sessions_and_hidden_messages_are_rejected(env):
     assert client.get("/assistant/history/group").status_code == 404
     store.sqlite.delete_message("answer")
     assert client.get("/assistant/history/answer").status_code == 404
+
+
+def test_opening_another_session_preserves_activity_and_deleted_messages(tmp_path):
+    from yumi.core.features.memory.memory import Memory
+
+    sid = "u_alice__personal_1"
+    memory = Memory(session_id=sid, storage_dir=tmp_path)
+    answer = memory.add_message("assistant", "The reply", turn_id="turn")
+    deleted = memory.add_message("user", "Removed from canonical history")
+    # A stale vector row must not revive a deletion or overwrite the richer
+    # canonical event when a new session/account-level Memory is opened.
+    memory.sqlite.delete_message(deleted)
+    store = AssistantStore(memory.sqlite, "alice")
+    trace(store)
+    before = memory.sqlite.get_message(answer)
+
+    reopened = Memory(session_id="default", storage_dir=tmp_path)
+    after = reopened.sqlite.get_message(answer)
+    assert after == before
+    assert reopened.sqlite.get_message(deleted) is None
+    detail = AssistantStore(reopened.sqlite, "alice").message_detail(after)
+    assert detail["thought"] == "Reasoning before the call\n\nReasoning after the call"
+    assert detail["tool_calls"][0]["result"] == "Sunny"

@@ -659,61 +659,69 @@ class SQLiteStore:
         return {r["session_id"]: int(r["n"] or 0) for r in rows}
 
     def import_messages(self, rows: list[dict[str, Any]]) -> None:
-        for row in sorted(rows, key=lambda r: int(r.get("timestamp_num") or 0)):
-            self.upsert_event_from_message(row)
+        """Import missing legacy rows without replacing canonical data/tombstones."""
+        with self.connect() as conn:
+            for row in sorted(rows, key=lambda r: int(r.get("timestamp_num") or 0)):
+                self._write_event(conn, row, overwrite=False)
 
-    def upsert_event_from_message(self, message: dict[str, Any]) -> None:
+    def upsert_event_from_message(self, message: dict[str, Any], *, overwrite: bool = True) -> None:
+        with self.connect() as conn:
+            self._write_event(conn, message, overwrite=overwrite)
+
+    def _write_event(self, conn: sqlite3.Connection, message: dict[str, Any], *, overwrite: bool) -> None:
         parsed = _event_fields_from_message(message)
         now = _utc_now()
-        with self.connect() as conn:
-            existing = conn.execute("SELECT revision FROM events WHERE id=?", (parsed["id"],)).fetchone()
-            revision = int(existing["revision"] if existing else 0) + (1 if existing else 0)
-            conn.execute(
-                """
-                INSERT INTO events(
-                  id, session_id, turn_id, event_type, role, content, thought,
-                  tool_call_id, tool_name, tool_args_json, tool_calls_json,
-                  metadata_json, revision, timestamp, timestamp_num,
-                  created_at, updated_at, deleted_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                ON CONFLICT(id) DO UPDATE SET
-                  session_id=excluded.session_id,
-                  turn_id=excluded.turn_id,
-                  event_type=excluded.event_type,
-                  role=excluded.role,
-                  content=excluded.content,
-                  thought=excluded.thought,
-                  tool_call_id=excluded.tool_call_id,
-                  tool_name=excluded.tool_name,
-                  tool_args_json=excluded.tool_args_json,
-                  tool_calls_json=excluded.tool_calls_json,
-                  metadata_json=excluded.metadata_json,
-                  revision=events.revision + 1,
-                  timestamp=excluded.timestamp,
-                  timestamp_num=excluded.timestamp_num,
-                  updated_at=excluded.updated_at,
-                  deleted_at=NULL
-                """,
-                (
-                    parsed["id"],
-                    parsed["session_id"],
-                    parsed["turn_id"],
-                    parsed["event_type"],
-                    parsed["role"],
-                    parsed["content"],
-                    parsed["thought"],
-                    parsed["tool_call_id"],
-                    parsed["tool_name"],
-                    parsed["tool_args_json"],
-                    parsed["tool_calls_json"],
-                    parsed["metadata_json"],
-                    revision,
-                    parsed["timestamp"],
-                    parsed["timestamp_num"],
-                    now,
-                    now,
-                ),
-            )
+        existing = conn.execute("SELECT revision FROM events WHERE id=?", (parsed["id"],)).fetchone()
+        revision = int(existing["revision"] if existing else 0) + (1 if existing else 0)
+        result = conn.execute(
+            """
+            INSERT INTO events(
+              id, session_id, turn_id, event_type, role, content, thought,
+              tool_call_id, tool_name, tool_args_json, tool_calls_json,
+              metadata_json, revision, timestamp, timestamp_num,
+              created_at, updated_at, deleted_at
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+              session_id=excluded.session_id,
+              turn_id=excluded.turn_id,
+              event_type=excluded.event_type,
+              role=excluded.role,
+              content=excluded.content,
+              thought=excluded.thought,
+              tool_call_id=excluded.tool_call_id,
+              tool_name=excluded.tool_name,
+              tool_args_json=excluded.tool_args_json,
+              tool_calls_json=excluded.tool_calls_json,
+              metadata_json=excluded.metadata_json,
+              revision=events.revision + 1,
+              timestamp=excluded.timestamp,
+              timestamp_num=excluded.timestamp_num,
+              updated_at=excluded.updated_at,
+              deleted_at=NULL
+            WHERE ?
+            """,
+            (
+                parsed["id"],
+                parsed["session_id"],
+                parsed["turn_id"],
+                parsed["event_type"],
+                parsed["role"],
+                parsed["content"],
+                parsed["thought"],
+                parsed["tool_call_id"],
+                parsed["tool_name"],
+                parsed["tool_args_json"],
+                parsed["tool_calls_json"],
+                parsed["metadata_json"],
+                revision,
+                parsed["timestamp"],
+                parsed["timestamp_num"],
+                now,
+                now,
+                overwrite,
+            ),
+        )
+        if result.rowcount:
             self._refresh_session_stats(conn, parsed["session_id"], now)
 
     def get_message(self, message_id: str) -> dict[str, Any] | None:
@@ -823,7 +831,7 @@ class SQLiteStore:
             conn.execute("DELETE FROM turn_traces WHERE session_id=?", (session_id,))
             self._refresh_session_stats(conn, session_id, now)
 
-    def upsert_session(self, session: dict[str, Any]) -> None:
+    def upsert_session(self, session: dict[str, Any], *, overwrite: bool = True) -> None:
         now = _utc_now()
         with self.connect() as conn:
             conn.execute(
@@ -843,6 +851,7 @@ class SQLiteStore:
                   last_message_at=excluded.last_message_at,
                   last_message_at_num=excluded.last_message_at_num,
                   message_count=excluded.message_count
+                WHERE ?
                 """,
                 (
                     session["session_id"],
@@ -860,6 +869,7 @@ class SQLiteStore:
                     int(session.get("last_message_at_num") or 0),
                     int(session.get("message_count") or 0),
                     _json(session.get("metadata") or {}),
+                    overwrite,
                 ),
             )
 

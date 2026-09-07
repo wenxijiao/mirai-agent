@@ -176,13 +176,18 @@ class Memory:
 
     def _sync_lancedb_to_sqlite_if_needed(self) -> None:
         try:
-            if self.sqlite.event_count(session_id=self.session_id) > 0:
+            # The index is shared across sessions and omits canonical fields
+            # such as turn_id. A new/empty session is not a fresh database.
+            if self.sqlite.event_count() > 0:
                 return
+            # Preserve legacy session metadata before importing its messages
+            # (which create default session rows). Concurrent canonical writes
+            # always win over either kind of legacy row.
+            for session in self.sessions_repo.list(status="all"):
+                self.sqlite.upsert_session(session, overwrite=False)
             rows = self.messages.query_rows()
             if rows:
                 self.sqlite.import_messages(rows)
-            for session in self.sessions_repo.list(status="all"):
-                self.sqlite.upsert_session(session)
         except Exception as exc:
             logger.debug("SQLite memory import skipped: %s", exc)
 

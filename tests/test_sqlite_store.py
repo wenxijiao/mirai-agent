@@ -1,6 +1,7 @@
 import json
 import sqlite3
 
+import pytest
 from yumi.core.features.config.store import load_saved_model_config, save_model_config
 from yumi.core.features.memory.memory import Memory
 from yumi.core.features.proactive.state import ProactiveStateStore
@@ -104,6 +105,55 @@ def test_turn_trace_round_trips_complete_json(tmp_path):
 
     assert store.get_turn_trace("turn-1") == trace
     assert store.list_turn_traces(session_id="s", owner_user_id="_local")[0]["id"] == "turn-1"
+
+
+def test_legacy_import_keeps_existing_events_and_deletion_tombstones(tmp_path):
+    store = SQLiteStore(tmp_path / "yumi.db")
+    original = {"id": "answer", "session_id": "s", "role": "assistant", "content": "Edited reply", "turn_id": "turn-1"}
+    store.upsert_event_from_message(original)
+    store.upsert_event_from_message({**original, "id": "deleted"})
+    store.delete_message("deleted")
+    before = store.get_message("answer")
+    store.upsert_session({"session_id": "s", "title": "Edited title", "status": "deleted", "is_pinned": True})
+
+    store.upsert_session({"session_id": "s", "title": "Stale title", "status": "active"}, overwrite=False)
+    store.import_messages(
+        [{**original, "id": mid, "turn_id": "", "content": "Stale index"} for mid in ("answer", "deleted", "legacy")]
+    )
+
+    assert store.get_message("answer") == before
+    assert store.get_message("deleted") is None
+    assert store.get_message("legacy")["content"] == "Stale index"
+    session = store.get_session("s")
+    assert session["title"] == "Edited title"
+    assert session["status"] == "deleted"
+    assert session["is_pinned"] is True
+
+
+def test_first_legacy_import_preserves_session_metadata(tmp_path):
+    memory = Memory(session_id="legacy", storage_dir=tmp_path)
+    # Populate only the old index, as on a pre-SQLite installation.
+    row = memory.messages.create(session_id="legacy", role="user", content="Old message")
+    memory.sessions_repo.update("legacy", title="Saved title", is_pinned=True, status="deleted")
+    assert memory.sqlite.event_count() == 0
+
+    migrated = Memory(session_id="default", storage_dir=tmp_path)
+    assert migrated.sqlite.get_message(row["id"])["content"] == "Old message"
+    session = migrated.sqlite.get_session("legacy")
+    assert session["title"] == "Saved title"
+    assert session["status"] == "deleted"
+    assert session["is_pinned"] is True
+
+
+def test_interrupted_legacy_import_does_not_leave_a_partial_canonical_store(tmp_path):
+    store = SQLiteStore(tmp_path / "yumi.db")
+    row = {"id": "first", "session_id": "s", "role": "user", "content": "Legacy message", "timestamp_num": 1}
+    malformed = {**row, "id": "second", "timestamp_num": 2, "metadata": {"invalid": object()}}
+    with pytest.raises(TypeError):
+        store.import_messages([row, malformed])
+    assert store.event_count() == 0
+    store.import_messages([row, {**malformed, "metadata": {}}])
+    assert store.event_count() == 2
 
 
 def test_lancedb_chat_history_can_rebuild_from_sqlite_events(tmp_path):
