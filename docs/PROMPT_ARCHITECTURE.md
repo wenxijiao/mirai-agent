@@ -19,6 +19,9 @@ other provider wire formats.
    - IDs already included in this layer are excluded from query-driven fact
      retrieval. Personalization behavior rules remain in their separate fixed
      rules block. Retrieval can still include facts outside the stable-layer cap.
+   - The system block states the category distinction briefly. Detailed examples
+     and category instructions live in the memory tool schema instead of being
+     duplicated verbatim in both places.
 
 3. **Turn Runtime Context**
    - Fresh, turn-only context collected before generation.
@@ -69,6 +72,9 @@ not inherit a process-wide cache of user content.
 
 - OpenAI-compatible providers receive system messages, user/assistant history,
   and `role="tool"` results.
+- DeepSeek thinking requests that include tools retain prior `reasoning_content`
+  as required by its API. Other supported modes can strip historical reasoning.
+  Payload excerpts do not remove reasoning fields required for provider replay.
 - Claude receives combined system text as a top-level system parameter; tool
   calls/results are converted to `tool_use` / `tool_result` content blocks.
 - Gemini receives combined system text as `system_instruction`; assistant turns

@@ -25,6 +25,16 @@ from yumi.core.platform.tools.replay import normalize_tool_history
 from yumi.tools import conversation_tools
 
 
+def test_detailed_category_guidance_is_not_repeated_in_fixed_rules(tmp_path):
+    from yumi.core.features.assistant.personalization import MEMORY_CLASSIFICATION_GUIDANCE, prompt_preferences
+    from yumi.core.platform.storage.assistant_store import AssistantStore
+
+    store = AssistantStore(SQLiteStore(tmp_path / "preferences.sqlite3"), "alice")
+    rules = prompt_preferences(store)
+    assert MEMORY_CLASSIFICATION_GUIDANCE not in rules
+    assert "dietary needs" in rules and "response and workflow rules" in rules
+
+
 def test_stable_facts_are_only_injected_once_and_overflow_facts_still_recalled(monkeypatch):
     rows = [
         dict(
