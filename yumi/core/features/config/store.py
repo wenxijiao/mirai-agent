@@ -346,6 +346,9 @@ def load_model_config() -> ModelConfig:
     if tts_style:
         config.tts_style = tts_style.strip() or config.tts_style
 
+    if tts_style_zh := os.getenv("YUMI_TTS_STYLE_ZH"):
+        config.tts_style_zh = tts_style_zh.strip() or config.tts_style_zh
+
     config.proactive_enabled = config.proactive_mode != "off"
 
     return config

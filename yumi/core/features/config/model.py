@@ -164,6 +164,7 @@ class ModelConfig(BaseModel):
     # sent as `instructions`). E.g. "speak as a cheerful young girl, light and
     # sweet, at a brisk natural pace". Ignored by providers without support.
     tts_style: str | None = None
+    tts_style_zh: str | None = None  # Optional Mandarin-only delivery guidance.
 
     @field_validator("search_provider")
     @classmethod

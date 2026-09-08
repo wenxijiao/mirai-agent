@@ -97,13 +97,19 @@ async def history(
     q: str = "",
     channel: str = "",
     before: int | None = None,
+    after: int | None = None,
+    anchor: int | None = None,
     limit: int = Query(50, ge=1, le=200),
 ):
+    if sum(value is not None for value in (before, after, anchor)) > 1:
+        raise HTTPException(422, "Choose one history cursor")
     return _store(identity).history(
         prefix=get_session_scope().session_id_prefix_for_identity(identity),
         query=q,
         channel=channel,
         before=before,
+        after=after,
+        anchor=anchor,
         limit=limit,
     )
 
@@ -386,3 +392,22 @@ router.include_router(tool_runs_router)
 from yumi.core.features.assistant.voice import router as voice_router  # noqa: E402
 
 router.include_router(voice_router)
+
+
+@router.get("/usage/requests")
+async def usage_requests(
+    identity: CurrentIdentity,
+    day: str,
+    timezone: str = "UTC",
+    before: str = "",
+    snapshot: int | None = Query(None, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    from yumi.core.features.config.paths import CONFIG_DIR
+    from yumi.core.platform.storage.sqlite_store import SQLiteStore
+
+    ledger = AssistantStore(SQLiteStore(CONFIG_DIR / "yumi.db"), identity.user_id)
+    try:
+        return ledger.usage_requests(day, timezone, before=before, limit=limit, snapshot=snapshot)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

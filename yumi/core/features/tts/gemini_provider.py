@@ -90,6 +90,7 @@ class GeminiTtsProvider(TextToSpeechProvider):
         voice: str | None = None,
         language: str | None = None,
         style: str | None = None,
+        chinese_style: str | None = None,
     ):
         try:
             from google import genai
@@ -108,6 +109,7 @@ class GeminiTtsProvider(TextToSpeechProvider):
         self._voice = voice or DEFAULT_VOICE
         self._language = language or "auto"
         self._style = (style or "").strip()
+        self._chinese_style = (chinese_style or "").strip()
 
     async def synthesize(
         self,
@@ -118,6 +120,16 @@ class GeminiTtsProvider(TextToSpeechProvider):
     ) -> SpeechAudio:
         return await asyncio.to_thread(self._synthesize_sync, text, voice or self._voice, language or self._language)
 
+    def _speech_prompt(self, text: str, language: str | None) -> str:
+        from yumi.core.features.chat.language import detect_prompt_language
+
+        language = (language or "auto").lower().replace("_", "-")
+        is_chinese = language.startswith("zh") or (language == "auto" and detect_prompt_language(text) == "Chinese")
+        directions = f"Say the following {self._style}:" if self._style else ""
+        if is_chinese and self._chinese_style:
+            directions += "\n" + self._chinese_style
+        return f"{directions.strip()}\n\n{text}" if directions.strip() else text
+
     def _synthesize_sync(self, text: str, voice: str, language: str | None) -> SpeechAudio:
         from google.genai import types
 
@@ -125,8 +137,7 @@ class GeminiTtsProvider(TextToSpeechProvider):
         # language directions in the prompt itself — there is no speaking-rate
         # parameter. The "Say <how>: <text>" shape is the documented pattern;
         # the instruction is not spoken.
-        if self._style:
-            text = f"Say the following {self._style}:\n\n{text}"
+        text = self._speech_prompt(text, language)
 
         speech_kwargs: dict[str, Any] = {
             "voice_config": types.VoiceConfig(

@@ -118,6 +118,8 @@ class AssistantStore:
         query: str = "",
         channel: str = "",
         before: int | None = None,
+        after: int | None = None,
+        anchor: int | None = None,
         limit: int = 50,
     ) -> dict:
         clauses = [
@@ -141,22 +143,54 @@ class AssistantStore:
                 "WHEN s.channel IN ('chat','app') OR s.channel IS NULL THEN 'app' ELSE s.channel END)=?"
             )
             params.append(channel)
-        if before is not None:
-            clauses.append("e.seq < ?")
-            params.append(before)
+        if sum(value is not None for value in (before, after, anchor)) > 1:
+            raise ValueError("Choose one history cursor")
+        base = " AND ".join(clauses)
         with self.sqlite.connect() as conn:
+            if anchor is not None:
+                pivot = conn.execute(
+                    f"SELECT MAX(e.seq) FROM events e LEFT JOIN sessions s ON s.session_id=e.session_id WHERE {base} AND e.timestamp_num < ?",
+                    [*params, anchor],
+                ).fetchone()[0]
+                if pivot is None:
+                    after = 0
+                else:
+                    before = pivot + 1
+            page_clauses = list(clauses)
+            page_params = list(params)
+            if before is not None:
+                page_clauses.append("e.seq < ?")
+                page_params.append(before)
+            if after is not None:
+                page_clauses.append("e.seq > ?")
+                page_params.append(after)
+            order = "ASC" if after is not None else "DESC"
             rows = conn.execute(
                 f"""SELECT e.*, COALESCE(json_extract(t.summary_json, '$.tool_call_count'),0) AS tool_call_count, json_extract(t.summary_json, '$.duration_ms') AS duration_ms
                 FROM events e LEFT JOIN sessions s ON s.session_id=e.session_id
                 LEFT JOIN turn_traces t ON t.turn_id=e.turn_id AND t.session_id=e.session_id
-                WHERE {" AND ".join(clauses)} ORDER BY e.seq DESC LIMIT ?""",
-                [*params, limit + 1],
+                WHERE {" AND ".join(page_clauses)} ORDER BY e.seq {order} LIMIT ?""",
+                [*page_params, limit],
             ).fetchall()
-        messages = [_event_row_to_message(r) for r in rows[:limit]]
+            if after is not None:
+                rows = list(reversed(rows))
+
+            def exists(operator, seq):
+                return (
+                    conn.execute(
+                        f"SELECT 1 FROM events e LEFT JOIN sessions s ON s.session_id=e.session_id WHERE {base} AND e.seq {operator} ? LIMIT 1",
+                        [*params, seq],
+                    ).fetchone()
+                    is not None
+                )
+
+            older = rows[-1]["seq"] if rows and exists("<", rows[-1]["seq"]) else None
+            newer = rows[0]["seq"] if rows and exists(">", rows[0]["seq"]) else None
+        messages = [_event_row_to_message(r) for r in rows]
         for message, row in zip(messages, rows):
             message["tool_call_count"] = row["tool_call_count"] if message["role"] == "assistant" else 0
             message["duration_ms"] = row["duration_ms"] if message["role"] == "assistant" else None
-        return {"messages": messages, "next_before": messages[-1]["seq"] if len(rows) > limit else None}
+        return {"messages": messages, "next_before": older, "next_after": newer}
 
     def message_detail(self, message):
         """Read only this message's public response/reasoning and tool activity.
@@ -293,7 +327,7 @@ class AssistantStore:
             raise ValueError("Provide a valid month and IANA timezone") from exc
         with self.sqlite.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM token_usage WHERE created_at_num >= ? AND created_at_num < ? "
+                "SELECT rowid AS ledger_seq, * FROM token_usage WHERE created_at_num >= ? AND created_at_num < ? "
                 "AND (owner_user_id=? OR (owner_user_id='' AND ?)) ORDER BY created_at_num DESC",
                 (
                     int(start.timestamp() * 1000),
@@ -305,7 +339,7 @@ class AssistantStore:
         keys = ("prompt_tokens", "completion_tokens", "total_tokens")
         totals = {key: 0 for key in keys}
         by_day = {
-            f"{month}-{day:02d}": {**totals, "requests": 0, "models": {}, "recent": []}
+            f"{month}-{day:02d}": {**totals, "requests": 0, "entry_count": 0, "models": {}, "recent": []}
             for day in range(1, monthrange(year, number)[1] + 1)
         }
         models = {}
@@ -317,6 +351,7 @@ class AssistantStore:
                 totals[key] += row[key]
                 item[key] += row[key]
             item["requests"] += int(row["usage_kind"] == "chat")
+            item["entry_count"] += 1
             by_kind[row["usage_kind"]] = by_kind.get(row["usage_kind"], 0) + row["total_tokens"]
             name = row["model"] or "Unknown model"
             item["models"][name] = item["models"].get(name, 0) + row["total_tokens"]
@@ -326,14 +361,53 @@ class AssistantStore:
         return {
             **totals,
             "month": month,
+            "snapshot_seq": max((row["ledger_seq"] for row in rows), default=0),
             "timezone": timezone_name,
             "requests": sum(row["usage_kind"] == "chat" for row in rows),
+            "entry_count": len(rows),
             "by_kind": by_kind,
             "daily": {day: item["total_tokens"] for day, item in by_day.items()},
             "by_day": by_day,
             "models": models,
             "recent": [dict(row) for row in rows[:30]],
         }
+
+    def usage_requests(
+        self, day: str, timezone_name: str, *, before: str = "", limit: int = 50, snapshot: int | None = None
+    ) -> dict:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            date = datetime.strptime(day, "%Y-%m-%d")
+            start = date.replace(tzinfo=ZoneInfo(timezone_name))
+            end = start + timedelta(days=1)
+            cursor = before.split(":", 1) if before else None
+            cursor_time = int(cursor[0]) if cursor else 0
+            if cursor and len(cursor) != 2:
+                raise ValueError("Invalid cursor")
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("Provide a valid day, timezone and cursor") from exc
+        clauses = ["created_at_num >= ?", "created_at_num < ?", "(owner_user_id=? OR (owner_user_id='' AND ?))"]
+        params = [
+            int(start.timestamp() * 1000),
+            int(end.timestamp() * 1000),
+            self.owner,
+            self.owner in ("", SINGLE_USER_ID),
+        ]
+        if snapshot is not None:
+            clauses.append("rowid <= ?")
+            params.append(snapshot)
+        if cursor:
+            clauses.append("(created_at_num < ? OR (created_at_num = ? AND id < ?))")
+            params.extend([cursor_time, cursor_time, cursor[1]])
+        with self.sqlite.connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM token_usage WHERE {' AND '.join(clauses)} ORDER BY created_at_num DESC, id DESC LIMIT ?",
+                [*params, limit + 1],
+            ).fetchall()
+        page = [dict(row) for row in rows[:limit]]
+        next_cursor = f"{page[-1]['created_at_num']}:{page[-1]['id']}" if len(rows) > limit else None
+        return {"entries": page, "next_cursor": next_cursor, "day": day, "timezone": timezone_name}
 
 
 def meaningful_recall_query(query: str) -> bool:

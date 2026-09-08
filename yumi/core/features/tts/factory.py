@@ -44,6 +44,7 @@ def create_tts_provider(config: ModelConfig | None = None) -> TextToSpeechProvid
             voice=cfg.tts_voice,
             language=cfg.tts_language,
             style=cfg.tts_style,
+            chinese_style=cfg.tts_style_zh,
         )
     if provider == "grok":
         from yumi.core.features.tts.grok_provider import GrokTtsProvider

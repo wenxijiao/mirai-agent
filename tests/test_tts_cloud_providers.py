@@ -186,3 +186,18 @@ def test_grok_tts_error_status_raises(monkeypatch):
     provider = GrokTtsProvider(api_key="xai")
     with pytest.raises(TtsError, match="Grok TTS failed"):
         asyncio.run(provider.synthesize("hello"))
+
+
+def test_mandarin_delivery_override_does_not_change_japanese_or_other_languages():
+    provider = object.__new__(GeminiTtsProvider)
+    provider._style = "with the original voice and delivery"
+    provider._chinese_style = "Use connected Mandarin phrases and short pauses."
+    for text, language in [("这是我的早餐，味道很好。", "auto"), ("你好", "zh-CN")]:
+        assert provider._chinese_style in provider._speech_prompt(text, language)
+    for text, language in [
+        ("これは私の朝ごはんです。", "auto"),
+        ("Have a lovely afternoon.", "auto"),
+        ("中文示例", "ja-JP"),
+        ("안녕하세요", "auto"),
+    ]:
+        assert provider._speech_prompt(text, language) == f"Say the following {provider._style}:\n\n{text}"
