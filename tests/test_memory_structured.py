@@ -89,14 +89,19 @@ def test_compaction_watermark_hides_folded_messages():
 
 
 def test_hybrid_structured_retrieval_falls_back_to_keyword():
+    from yumi.core.features.memory.context import ContextBuilder
+
     with tempfile.TemporaryDirectory() as td:
         m = Memory(session_id="s_hybrid", storage_dir=td, max_recent=20)
         m.create_long_term_memory(kind="fact", content="This project stores memory in LanceDB.", session_id="s_hybrid")
 
-        ctx = m.get_context(query="How is LanceDB memory stored?")
-        structured = [msg for msg in ctx if msg["role"] == "system" and "Structured memory" in msg["content"]]
+        structured = ContextBuilder(m)._structured_memory_message("How is LanceDB memory stored?", limit=5)
         assert structured
-        assert "LanceDB" in structured[0]["content"]
+        assert "LanceDB" in structured["content"]
+        ctx = m.get_context(query="How is LanceDB memory stored?")
+        # The fact is already in stable context, so a full prompt does not
+        # repeat the same source in the relevance layer.
+        assert sum("This project stores memory in LanceDB." in msg["content"] for msg in ctx) == 1
 
 
 def test_context_dedupes_consecutive_identical_user_repeats():

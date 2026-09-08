@@ -93,7 +93,8 @@ class ContextBuilder:
         # transcript: it only changes at compaction time, exactly when the
         # transcript watermark moves and the cache breaks anyway.
         formatted_messages = [self.memory.get_system_message()]
-        stable_context = None if group else self._stable_user_context_message()
+        included_memory_ids: set[str] = set()
+        stable_context = None if group else self._stable_user_context_message(included_ids=included_memory_ids)
         if stable_context:
             formatted_messages.append(stable_context)
 
@@ -111,9 +112,9 @@ class ContextBuilder:
 
         if query and not group:
             structured = (
-                self._personal_facts_message(query, limit=max_cross)
+                self._personal_facts_message(query, limit=max_cross, excluded_ids=included_memory_ids)
                 if personal
-                else self._structured_memory_message(query, limit=max_cross)
+                else self._structured_memory_message(query, limit=max_cross, excluded_ids=included_memory_ids)
             )
             if structured:
                 formatted_messages.append(structured)
@@ -127,7 +128,7 @@ class ContextBuilder:
 
         return formatted_messages
 
-    def _stable_user_context_message(self) -> dict | None:
+    def _stable_user_context_message(self, *, included_ids: set[str] | None = None) -> dict | None:
         """Return durable user context that should be visible every turn.
 
         This is intentionally separate from query-driven structured retrieval:
@@ -180,6 +181,8 @@ class ContextBuilder:
             for row in items[:4]:
                 content = " ".join(str(row.get("content") or "").split())
                 lines.append(STABLE_USER_CONTEXT_ITEM_TEMPLATE.format(content=content[:500]))
+                if included_ids is not None and row.get("id"):
+                    included_ids.add(str(row["id"]))
                 total += 1
                 if total >= 16:
                     break
@@ -203,7 +206,7 @@ class ContextBuilder:
             "content": SESSION_SUMMARY_TEMPLATE.format(summary=summary),
         }
 
-    def _personal_facts_message(self, query: str, *, limit: int) -> dict | None:
+    def _personal_facts_message(self, query: str, *, limit: int, excluded_ids: set[str] | None = None) -> dict | None:
         from yumi.core.features.assistant.personalization import BEHAVIOR_KINDS
         from yumi.core.features.memory.retrieval import keyword_score
         from yumi.core.platform.storage.assistant_store import meaningful_recall_query
@@ -212,12 +215,18 @@ class ContextBuilder:
             return None
         # SQLite is canonical; vector hits supply relevance only, never stale
         # content or deleted memories. Preferences are already applied every turn.
-        rows = self.memory.list_long_term_memories(session_id=None, limit=10000)
+        rows = [
+            row
+            for row in self.memory.list_long_term_memories(session_id=None, limit=10000)
+            if row.get("id") not in (excluded_ids or set())
+            and row.get("kind") not in BEHAVIOR_KINDS
+            and self.memory.can_recall(row)
+        ]
+        if not rows:
+            return None
         semantic = {c.id: c.score for c in self.retriever._long_term_candidates(query, limit=limit * 4)}
         matches = []
         for row in rows:
-            if row.get("kind") in BEHAVIOR_KINDS or not self.memory.can_recall(row):
-                continue
             lexical = keyword_score(query, row["content"])
             similarity = semantic.get(row["id"], 0.0)
             if lexical <= 0 and similarity < 0.55:
@@ -230,10 +239,16 @@ class ContextBuilder:
         lines.extend(f"- [{row['kind']}] {row['content'][:500]}" for _, row in matches[: min(limit, 12)])
         return {"role": "system", "content": "\n".join(lines)}
 
-    def _structured_memory_message(self, query: str, *, limit: int) -> dict | None:
+    def _structured_memory_message(
+        self, query: str, *, limit: int, excluded_ids: set[str] | None = None
+    ) -> dict | None:
         if limit <= 0:
             return None
-        candidates = self.retriever.structured(query, limit=min(12, max(4, limit)))
+        candidates = [
+            c
+            for c in self.retriever.structured(query, limit=min(24, max(4, limit * 2)))
+            if c.id not in (excluded_ids or set())
+        ][: min(12, max(4, limit))]
         if not candidates:
             return None
         lines = [STRUCTURED_MEMORY_HEADER]
@@ -310,7 +325,7 @@ class ContextBuilder:
                     if current_count < total_current - current_excluded_in_window:
                         results = trim_leading_orphan_assistant_tool_calls(results)
                     results = dedupe_consecutive_user_rows(results)
-                    return [_format_transcript_message(msg) for msg in results]
+                    return _format_transcript_rows(results)
             except Exception:
                 pass
 
@@ -378,7 +393,21 @@ class ContextBuilder:
             # a separate concern handled by callers/tests).
             results = trim_leading_orphan_assistant_tool_calls(results)
         results = dedupe_consecutive_user_rows(results)
-        return [_format_transcript_message(msg) for msg in results]
+        return _format_transcript_rows(results)
+
+
+def _format_transcript_rows(rows: list[dict]) -> list[dict]:
+    from yumi.core.features.memory.history_payloads import compact_historical_message
+
+    # The latest user turn stays verbatim for immediate follow-up questions and
+    # for callers resuming an unfinished tool loop. Earlier payloads are previews.
+    latest_user = max((i for i, row in enumerate(rows) if row.get("role") == "user"), default=0)
+    return [
+        compact_historical_message(_format_transcript_message(row), str(row.get("id") or ""))
+        if i < latest_user
+        else _format_transcript_message(row)
+        for i, row in enumerate(rows)
+    ]
 
 
 def _format_transcript_message(msg: dict) -> dict:

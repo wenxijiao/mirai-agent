@@ -16,6 +16,9 @@ other provider wire formats.
    - Injected as its own system message every turn when saved memories exist.
    - Managed through built-in tools: `remember_user_context`,
      `list_user_context`, and `forget_user_context`.
+   - IDs already included in this layer are excluded from query-driven fact
+     retrieval. Personalization behavior rules remain in their separate fixed
+     rules block. Retrieval can still include facts outside the stable-layer cap.
 
 3. **Turn Runtime Context**
    - Fresh, turn-only context collected before generation.
@@ -29,6 +32,12 @@ other provider wire formats.
    - The recent transcript is the current session plus sibling sessions for the
      same owner (`voice_`, `tg_`, `dc_`, `line_`, `chat_`), with sibling turns
      labeled by channel. It is not an unbounded dump of every conversation.
+   - The latest user turn stays verbatim. Older tool results and manual tool
+     attachments over 1,800 characters become bounded head/tail excerpts in the
+     prompt only. Original records in chat/history remain unchanged. Excerpts
+     carry an event ID for the discoverable `read_conversation_record` tool,
+     which reads exact saved data in pages and enforces ownership and forgetting.
+     Ordinary text, call IDs and current-turn tool execution are preserved.
 
 5. **Current user input**
    - The user's message for this turn. Runtime context is never mixed into the
@@ -42,6 +51,19 @@ other provider wire formats.
 
 7. **Tool results**
    - Added only after the model requests a tool call and the runtime executes it.
+   - A request snapshot preserves the original task and its complete active tool
+     sequence across iterations; the old-history excerpts are never applied to
+     the snapshot's in-flight tool results.
+
+## Embedding work
+
+Each chat request owns a bounded in-memory vector cache. Repeated text for the
+same owner, provider instance and model shares one embedding request, including
+concurrent worker-thread callers. Only actual provider calls record usage. Cache
+keys contain text hashes, not prompt text; vectors are copied on return. Failed
+or degenerate results are not reused. Closing the turn clears and disables the
+cache, including copies inherited by background tasks. Standalone indexing does
+not inherit a process-wide cache of user content.
 
 ## Provider Mapping
 

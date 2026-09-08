@@ -64,10 +64,23 @@ class EmbeddingProcessor:
 
     def get_vector(self, text: str) -> list[float]:
         """Return an embedding vector for ``text`` (zero-filled fallback on failure)."""
-        if not self.embed_model or not self.embedding_available or self.embed_provider is None:
+        provider, model = self.embed_provider, self.embed_model
+        if not model or not self.embedding_available or provider is None:
             return [0.0] * self.fallback_vector_size
         try:
-            return self.embed_provider.embed(self.embed_model, text)
+            from yumi.core.platform.runtime.embedding_cache import request_embedding_cache
+            from yumi.core.platform.runtime.usage_context import usage_owner_id
+
+            cache = request_embedding_cache.get()
+            if cache is not None:
+                return cache.get(
+                    usage_owner_id.get(),
+                    provider,
+                    model,
+                    text,
+                    lambda: provider.embed(model, text),
+                )
+            return provider.embed(model, text)
         except Exception as exc:
             logger.warning("Embedding generation failed: %s", exc)
             return [0.0] * self.fallback_vector_size

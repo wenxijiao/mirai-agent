@@ -200,11 +200,17 @@ class ChatTurnService:
 
         usage_owner_token = usage_owner_id.set(owner_uid or "")
         usage_turn_token = usage_turn_id.set(ctx.turn_id)
+        from yumi.core.platform.runtime.embedding_cache import RequestEmbeddingCache, request_embedding_cache
+
+        embedding_cache = RequestEmbeddingCache()
+        embedding_cache_token = request_embedding_cache.set(embedding_cache)
         sink = ChatTraceSink(ctx)
         try:
             async for event in self._run_turn(ctx, sink):
                 yield event
         finally:
+            embedding_cache.close()
+            request_embedding_cache.reset(embedding_cache_token)
             usage_owner_id.reset(usage_owner_token)
             usage_turn_id.reset(usage_turn_token)
             conversation_session.reset(session_token)
