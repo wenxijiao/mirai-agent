@@ -298,6 +298,8 @@ class AssistantStore:
         ]
 
     def usage(self, days: int) -> dict:
+        from yumi.core.platform.storage.usage_details import present_usage, summarize_usage
+
         start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
         with self.sqlite.connect() as conn:
             rows = conn.execute(
@@ -310,11 +312,20 @@ class AssistantStore:
         for row in rows:
             day = datetime.fromtimestamp(row["created_at_num"] / 1000, timezone.utc).date().isoformat()
             daily[day] = daily.get(day, 0) + row["total_tokens"]
-        return {**totals, "days": days, "timezone": "UTC", "daily": daily, "recent": [dict(r) for r in rows[:30]]}
+        return {
+            **totals,
+            "days": days,
+            "timezone": "UTC",
+            "daily": daily,
+            "recent": [present_usage(r) for r in rows[:30]],
+            "cache": summarize_usage(rows),
+        }
 
     def monthly_usage(self, month: str, timezone_name: str) -> dict:
         from calendar import monthrange
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        from yumi.core.platform.storage.usage_details import present_usage, summarize_usage
 
         try:
             zone = ZoneInfo(timezone_name)
@@ -344,9 +355,11 @@ class AssistantStore:
         }
         models = {}
         by_kind = {}
+        day_rows = {day: [] for day in by_day}
         for row in rows:
             day = datetime.fromtimestamp(row["created_at_num"] / 1000, zone).date().isoformat()
             item = by_day[day]
+            day_rows[day].append(row)
             for key in keys:
                 totals[key] += row[key]
                 item[key] += row[key]
@@ -357,9 +370,12 @@ class AssistantStore:
             item["models"][name] = item["models"].get(name, 0) + row["total_tokens"]
             models[name] = models.get(name, 0) + row["total_tokens"]
             if len(item["recent"]) < 10:
-                item["recent"].append(dict(row))
+                item["recent"].append(present_usage(row))
+        for day, item in by_day.items():
+            item["cache"] = summarize_usage(day_rows[day])
         return {
             **totals,
+            "cache": summarize_usage(rows),
             "month": month,
             "snapshot_seq": max((row["ledger_seq"] for row in rows), default=0),
             "timezone": timezone_name,
@@ -369,7 +385,7 @@ class AssistantStore:
             "daily": {day: item["total_tokens"] for day, item in by_day.items()},
             "by_day": by_day,
             "models": models,
-            "recent": [dict(row) for row in rows[:30]],
+            "recent": [present_usage(row) for row in rows[:30]],
         }
 
     def usage_requests(
@@ -405,7 +421,9 @@ class AssistantStore:
                 f"SELECT * FROM token_usage WHERE {' AND '.join(clauses)} ORDER BY created_at_num DESC, id DESC LIMIT ?",
                 [*params, limit + 1],
             ).fetchall()
-        page = [dict(row) for row in rows[:limit]]
+        from yumi.core.platform.storage.usage_details import present_usage
+
+        page = [present_usage(row) for row in rows[:limit]]
         next_cursor = f"{page[-1]['created_at_num']}:{page[-1]['id']}" if len(rows) > limit else None
         return {"entries": page, "next_cursor": next_cursor, "day": day, "timezone": timezone_name}
 

@@ -68,6 +68,38 @@ or degenerate results are not reused. Closing the turn clears and disables the
 cache, including copies inherited by background tasks. Standalone indexing does
 not inherit a process-wide cache of user content.
 
+Tool-discovery query vectors use that same request cache. Only static tool and
+device descriptions enter the shared bounded process/disk cache. Request text
+does not enter it. Description keys include provider endpoint, model and a hash
+of the description; changing a description or model naturally invalidates it.
+
+## Cache identity and usage
+
+DeepSeek requests carry an opaque SHA-256 account identifier in `extra_body.user_id`.
+It is stable across channels, context resets and requests, but differs by owner.
+No email address, raw account identifier, session or request ID is transmitted as
+the cache identity. The provider's account-isolation control is separate from
+Yumi's own conversation and tool authorization.
+
+Each usage ledger row can retain the observed per-call input, output, cache read,
+cache write and price snapshot in `usage_details_json` (SQLite schema version 4).
+Zero cache hits and absent cache telemetry are different. Older/unreported input
+remains an unknown category, excluded from the hit-rate denominator; coverage
+is reported separately. Cache reads are a subset of input, never added twice.
+Chat-loop and summary usage preserve provider metadata through persistence.
+
+Monthly, daily and paginated request APIs expose the same cache partitions and
+price coverage. Price estimates use integer nano-USD and the public rates
+verified on 2026-09-08, captured at request time. Current supported rates are the
+three official DeepSeek v4 model names, including weekday UTC peak/off-peak
+periods. Compatible proxy URLs and other providers remain unpriced. Missing
+cache telemetry can price only the known output portion. Historical rows are
+not assigned today's prices, and changing the rate table never reprices stored
+snapshots. Estimates exclude voice, external tools, credits, taxes and discounts.
+
+Sources: [DeepSeek prices](https://api-docs.deepseek.com/quick_start/pricing/)
+and [account isolation](https://api-docs.deepseek.com/quick_start/rate_limit/).
+
 ## Provider Mapping
 
 - OpenAI-compatible providers receive system messages, user/assistant history,

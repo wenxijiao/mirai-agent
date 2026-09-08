@@ -115,6 +115,7 @@ async def _summarize(bot: Any, prompt_text: str) -> str:
     finish_reason: str | None = None
     provider_finish_reason: str | None = None
     prompt_tokens = completion_tokens = 0
+    usage_parts = []
     try:
         async for chunk in bot.provider.chat_stream(
             model=bot.model_name,
@@ -123,6 +124,9 @@ async def _summarize(bot: Any, prompt_text: str) -> str:
             think=False,
         ):
             if chunk.get("type") == "usage":
+                from yumi.core.platform.storage.usage_details import capture_usage
+
+                usage_parts.append(capture_usage(chunk))
                 prompt_tokens += int(chunk.get("prompt_tokens") or 0)
                 completion_tokens += int(chunk.get("completion_tokens") or 0)
             elif chunk.get("type") == "text":
@@ -135,7 +139,11 @@ async def _summarize(bot: Any, prompt_text: str) -> str:
         from yumi.core.platform.dispatch.auxiliary_usage import record_auxiliary_usage
 
         record_auxiliary_usage(
-            kind="summary", model=bot.model_name, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+            kind="summary",
+            model=bot.model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            usage_parts=usage_parts,
         )
     if finish_reason not in (None, "stop"):
         detail = f" ({provider_finish_reason})" if provider_finish_reason else ""

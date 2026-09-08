@@ -180,6 +180,7 @@ def test_deepseek_thinking_controls_wire_and_preserves_prior_reasoning():
                 pass
 
     asyncio.run(run())
-    assert captured[0]["extra_body"] == {"thinking": {"type": "disabled"}}
-    assert captured[1]["extra_body"] == {"thinking": {"type": "enabled"}}
+    assert captured[0]["extra_body"]["thinking"] == {"type": "disabled"}
+    assert captured[1]["extra_body"]["thinking"] == {"type": "enabled"}
+    assert captured[0]["extra_body"]["user_id"] == captured[1]["extra_body"]["user_id"]
     assert captured[1]["messages"][0]["reasoning_content"] == "saved"

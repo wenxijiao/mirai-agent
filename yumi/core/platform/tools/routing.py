@@ -342,6 +342,28 @@ def _cached_embedding(model: str, text: str, *, persistent: bool = False) -> lis
 
     from yumi.core.platform.tools.embedding_cache import cache_key, read_vector, write_vector
 
+    # Query vectors are private request data. Only tool descriptions enter the
+    # process/disk cache; query reuse shares the account-scoped memory cache.
+    if not persistent:
+        from yumi.core.platform.runtime.cache_identity import cache_owner
+        from yumi.core.platform.runtime.embedding_cache import request_embedding_cache
+        from yumi.core.platform.runtime.usage_context import usage_operation
+
+        token = usage_operation.set("tool_search")
+        try:
+            cache = request_embedding_cache.get()
+            vector = (
+                cache.get(cache_owner(), provider, model, text, lambda: provider.embed(model, text))
+                if cache is not None
+                else provider.embed(model, text)
+            )
+            return list(vector) if not is_degenerate_vector(vector) else None
+        except Exception:
+            logger.debug("Tool query embedding failed", exc_info=True)
+            return None
+        finally:
+            usage_operation.reset(token)
+
     key = cache_key(provider, model, text)
     with _EMBED_CACHE_LOCK:
         cached = _EMBED_CACHE.get(key)

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_CONFIG_DIR = Path.home() / ".yumi"
 YUMI_V1_TOOL_CALLS = "__yumi:v1:tc__\n"
 YUMI_V1_TOOL_RESULT = "__yumi:v1:tool__\n"
@@ -149,6 +149,7 @@ class SQLiteStore:
                 for name, definition in (
                     ("usage_kind", "TEXT NOT NULL DEFAULT 'chat'"),
                     ("estimated", "INTEGER NOT NULL DEFAULT 0"),
+                    ("usage_details_json", "TEXT NOT NULL DEFAULT '[]'"),
                 ):
                     if name not in columns:
                         conn.execute(f"ALTER TABLE token_usage ADD COLUMN {name} {definition}")
@@ -407,6 +408,7 @@ class SQLiteStore:
         completion_tokens: int = 0,
         usage_kind: str = "chat",
         estimated: bool = False,
+        usage_parts: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Persist one row of token usage for a completed assistant turn."""
         prompt = max(0, int(prompt_tokens or 0))
@@ -426,6 +428,7 @@ class SQLiteStore:
             "total_tokens": total,
             "usage_kind": usage_kind,
             "estimated": bool(estimated),
+            "usage_details_json": _json(usage_parts or []),
             "created_at": now,
             "created_at_num": now_num,
         }
@@ -434,8 +437,8 @@ class SQLiteStore:
                 """
                 INSERT INTO token_usage(
                   id, session_id, turn_id, owner_user_id, provider, model,
-                  prompt_tokens, completion_tokens, total_tokens, created_at, created_at_num, usage_kind, estimated
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  prompt_tokens, completion_tokens, total_tokens, created_at, created_at_num, usage_kind, estimated, usage_details_json
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -451,6 +454,7 @@ class SQLiteStore:
                     now_num,
                     usage_kind,
                     int(estimated),
+                    row["usage_details_json"],
                 ),
             )
         return row

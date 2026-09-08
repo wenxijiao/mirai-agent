@@ -275,9 +275,10 @@ class ClaudeProvider(BaseLLMProvider):
                             "completion_tokens": ct,
                             "model": model,
                         }
-                        if cache_read:
+                        payload["provider"] = "claude"
+                        if getattr(u, "cache_read_input_tokens", None) is not None:
                             payload["cached_prompt_tokens"] = cache_read
-                        if cache_write:
+                        if getattr(u, "cache_creation_input_tokens", None) is not None:
                             payload["cache_write_prompt_tokens"] = cache_write
                         yield payload
             except Exception:

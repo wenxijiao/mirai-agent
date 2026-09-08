@@ -27,8 +27,12 @@ class UsageRecorder:
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.usage_model = ""
+        self.usage_parts: list[dict] = []
 
     def add(self, chunk: dict) -> None:
+        from yumi.core.platform.storage.usage_details import capture_usage
+
+        self.usage_parts.append(capture_usage(chunk))
         self.total_prompt_tokens += int(chunk.get("prompt_tokens", 0) or 0)
         self.total_completion_tokens += int(chunk.get("completion_tokens", 0) or 0)
         if chunk.get("model"):
@@ -70,6 +74,7 @@ class UsageRecorder:
                     model=model,
                     prompt_tokens=self.total_prompt_tokens,
                     completion_tokens=self.total_completion_tokens,
+                    usage_parts=self.usage_parts,
                 )
             except Exception:
                 logger.debug("token usage persistence skipped", exc_info=True)
@@ -83,12 +88,13 @@ def _persist_token_usage(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
+    usage_parts: list[dict] | None = None,
 ) -> None:
     """Write one ``token_usage`` row to the default memory store (best effort).
 
     Deliberately avoids ``load_model_config()`` (which runs ~7 SQLite SELECTs)
-    on the hot per-turn path; the stats dashboard groups by ``model``, not
-    ``provider``, so the provider column is left blank.
+    on the hot per-turn path. Provider attribution and price snapshots come
+    from observed provider usage, not from mutable current configuration.
     """
     from yumi.core.features.memory.store import get_memory_store
 
@@ -99,4 +105,6 @@ def _persist_token_usage(
         model=model,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        usage_parts=usage_parts,
+        provider=next((str(p.get("provider")) for p in usage_parts or [] if p.get("provider")), ""),
     )

@@ -493,7 +493,7 @@ class GeminiProvider(BaseLLMProvider):
             if last_usage is not None:
                 pt = int(getattr(last_usage, "prompt_token_count", None) or 0)
                 ct = int(getattr(last_usage, "candidates_token_count", None) or 0)
-                cached = int(getattr(last_usage, "cached_content_token_count", None) or 0)
+                cached = getattr(last_usage, "cached_content_token_count", None)
                 if pt or ct:
                     payload: dict[str, Any] = {
                         "type": "usage",
@@ -501,8 +501,9 @@ class GeminiProvider(BaseLLMProvider):
                         "completion_tokens": ct,
                         "model": model,
                     }
-                    if cached:
-                        payload["cached_prompt_tokens"] = cached
+                    payload["provider"] = "gemini"
+                    if cached is not None:
+                        payload["cached_prompt_tokens"] = int(cached)
                     yield payload
 
             if collected_tool_calls:

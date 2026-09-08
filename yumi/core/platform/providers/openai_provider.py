@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, AsyncIterator
 
 from yumi.core.platform.providers.base import BaseLLMProvider, ProviderFinishReason, provider_finish_chunk
@@ -128,6 +129,7 @@ class OpenAIProvider(BaseLLMProvider):
         tools: list[dict] | None = None,
         think: bool = False,
     ) -> AsyncIterator[dict]:
+        started_at = time.time()
         deepseek = getattr(self, "api_family", "openai") == "deepseek"
         replay = messages if deepseek and tools and think else _strip_historical_reasoning(messages)
         if deepseek and tools and think:
@@ -155,7 +157,12 @@ class OpenAIProvider(BaseLLMProvider):
                 else "max_completion_tokens"
             ] = self.max_output_tokens
         if deepseek:
-            kwargs["extra_body"] = {"thinking": {"type": "enabled" if think else "disabled"}}
+            from yumi.core.platform.runtime.cache_identity import provider_cache_user_id
+
+            kwargs["extra_body"] = {
+                "thinking": {"type": "enabled" if think else "disabled"},
+                "user_id": provider_cache_user_id(),
+            }
         yield {
             "type": "model_settings",
             "requested_think": think,
@@ -226,12 +233,12 @@ class OpenAIProvider(BaseLLMProvider):
             # DeepSeek reports prompt_cache_hit_tokens. Both are subsets of
             # prompt_tokens (billed at a discount), surfaced so traces can verify
             # the prefix actually caches.
-            cached = 0
+            cached = None
             details = getattr(usage_payload, "prompt_tokens_details", None)
             if details is not None:
-                cached = int(getattr(details, "cached_tokens", None) or 0)
-            if not cached:
-                cached = int(getattr(usage_payload, "prompt_cache_hit_tokens", None) or 0)
+                cached = getattr(details, "cached_tokens", None)
+            if cached is None:
+                cached = getattr(usage_payload, "prompt_cache_hit_tokens", None)
             if pt or ct:
                 payload: dict[str, Any] = {
                     "type": "usage",
@@ -239,9 +246,16 @@ class OpenAIProvider(BaseLLMProvider):
                     "completion_tokens": ct,
                     "model": model,
                 }
-                if cached:
-                    payload["cached_prompt_tokens"] = cached
-                yield payload
+                if cached is not None:
+                    payload["cached_prompt_tokens"] = int(cached)
+                from yumi.core.platform.providers.usage_pricing import price_usage
+
+                yield price_usage(
+                    payload,
+                    provider=getattr(self, "api_family", "openai"),
+                    base_url=str(getattr(self._async_client, "base_url", "")),
+                    started_at=started_at,
+                )
 
         if collected_tool_calls:
             tool_calls_list = []

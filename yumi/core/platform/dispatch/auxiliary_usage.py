@@ -6,7 +6,13 @@ logger = get_logger(__name__)
 
 
 def record_auxiliary_usage(
-    *, kind: str, model: str, prompt_tokens: int, completion_tokens: int = 0, estimated: bool = False
+    *,
+    kind: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int = 0,
+    estimated: bool = False,
+    usage_parts: list[dict] | None = None,
 ) -> None:
     from yumi.core.features.config.paths import CONFIG_DIR
     from yumi.core.platform.plugins import get_current_identity, get_quota_policy
@@ -30,6 +36,20 @@ def record_auxiliary_usage(
             completion_tokens=completion_tokens,
             usage_kind=kind,
             estimated=estimated,
+            usage_parts=usage_parts
+            if usage_parts is not None
+            else (
+                [
+                    {
+                        "model": model,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "cached_prompt_tokens": 0,
+                    }
+                ]
+                if kind != "summary"
+                else None
+            ),
         )
     except Exception:
         logger.debug("Auxiliary usage persistence skipped", exc_info=True)
